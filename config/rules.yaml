@@ -1,0 +1,70 @@
+default_template: default
+
+rules:
+  - if_contains: "long distance"
+    template: long_distance
+  - if_contains: "packing"
+    template: packing
+
+templates:
+  default: |
+    Hi {customer_name},
+
+    Thank you for contacting us about your move.
+
+    Here is what we understood from your email:
+    {summary}
+
+    Load: {load_address}
+    Unload: {unload_address}
+    Date: {move_date}
+    Time: {move_time}
+
+    Inventory:
+    {inventory}
+
+    Estimated quote: {quote}
+
+    Let us know if you would like to book or if anything needs updating.
+
+    Best regards,
+    Your Moving Team
+
+  long_distance: |
+    Hi {customer_name},
+
+    Thanks for your long-distance move inquiry.
+
+    {summary}
+
+    Estimated quote: {quote}
+
+    We will confirm truck size and crew once we finalize details.
+
+    Best regards,
+    Your Moving Team
+
+  packing: |
+    Hi {customer_name},
+
+    Thank you for asking about packing services.
+
+    {summary}
+
+    Estimated quote (move + packing): {quote}
+
+    Best regards,
+    Your Moving Team
+
+  confirmation: |
+    Hi {customer_name},
+
+    This confirms your move on {move_date}.
+
+    Load: {load_address}
+    Unload: {unload_address}
+
+    We look forward to helping you!
+
+    Best regards,
+    Your Moving Team

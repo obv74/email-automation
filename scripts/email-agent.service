@@ -1,0 +1,15 @@
+[Unit]
+Description=Email Agent (FastAPI)
+After=network.target ollama.service
+
+[Service]
+Type=simple
+User=emailagent
+WorkingDirectory=/opt/email-agent
+EnvironmentFile=/opt/email-agent/.env
+ExecStart=/opt/email-agent/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

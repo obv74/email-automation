@@ -1,0 +1,132 @@
+"""FastAPI application entrypoint."""
+
+import logging
+import secrets
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
+from sqlalchemy.orm import Session
+
+from app.auth.google_oauth import exchange_code, get_authorization_url
+from app.config import get_settings
+from app.dashboard.routes import router as dashboard_router
+from app.db.models import ProcessedThread, Tenant, get_db, init_db
+from app.scheduler.runner import start_scheduler
+from app.services.pipeline import poll_unread_threads, process_thread
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+_oauth_states: dict[str, str] = {}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    init_db()
+
+    db = next(get_db())
+    try:
+        tenant = db.query(Tenant).filter(Tenant.id == settings.default_tenant_id).first()
+        if not tenant:
+            tenant = Tenant(
+                id=settings.default_tenant_id,
+                name=settings.default_tenant_name,
+                pricing_sheet_id=settings.pricing_sheet_id or None,
+            )
+            db.add(tenant)
+            db.commit()
+    finally:
+        db.close()
+
+    start_scheduler(settings.default_tenant_id)
+    yield
+
+
+app = FastAPI(title="Email Agent", version="0.1.0", lifespan=lifespan)
+app.include_router(dashboard_router)
+
+
+@app.get("/")
+def root():
+    return RedirectResponse(url="/dashboard")
+
+
+@app.get("/health")
+def health():
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "tenant": settings.default_tenant_id,
+        "ollama_model": settings.ollama_model,
+        "reply_mode": settings.reply_mode,
+    }
+
+
+@app.get("/auth/google/connect")
+def google_connect():
+    settings = get_settings()
+    if not settings.google_client_id or not settings.google_client_secret:
+        raise HTTPException(400, "Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.")
+    state = secrets.token_urlsafe(16)
+    _oauth_states[state] = settings.default_tenant_id
+    return RedirectResponse(get_authorization_url(state))
+
+
+@app.get("/auth/google/callback")
+def google_callback(request: Request, db: Session = Depends(get_db)):
+    settings = get_settings()
+    state = request.query_params.get("state", "")
+    tenant_id = _oauth_states.pop(state, settings.default_tenant_id)
+    authorization_response = str(request.url)
+    try:
+        exchange_code(db, tenant_id, authorization_response)
+    except Exception as exc:
+        logger.exception("OAuth callback failed")
+        raise HTTPException(400, f"OAuth failed: {exc}") from exc
+    return RedirectResponse("/dashboard")
+
+
+@app.post("/api/threads/{thread_id}/process")
+async def api_process_thread(thread_id: str, force: bool = False, db: Session = Depends(get_db)):
+    settings = get_settings()
+    try:
+        return await process_thread(db, settings.default_tenant_id, thread_id, force=force)
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/poll")
+async def api_poll(db: Session = Depends(get_db)):
+    settings = get_settings()
+    try:
+        return await poll_unread_threads(db, settings.default_tenant_id)
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/threads/{thread_id}/awaiting-reply")
+def mark_awaiting_reply(thread_id: str, db: Session = Depends(get_db)):
+    """Mark a thread for no-response follow-up (after you send initial outreach)."""
+    settings = get_settings()
+    row = (
+        db.query(ProcessedThread)
+        .filter(
+            ProcessedThread.tenant_id == settings.default_tenant_id,
+            ProcessedThread.gmail_thread_id == thread_id,
+        )
+        .first()
+    )
+    if not row:
+        row = ProcessedThread(
+            tenant_id=settings.default_tenant_id,
+            gmail_thread_id=thread_id,
+            last_message_id="",
+            status="awaiting_reply",
+        )
+        db.add(row)
+    else:
+        row.status = "awaiting_reply"
+    db.commit()
+    return {"status": "ok", "thread_id": thread_id}

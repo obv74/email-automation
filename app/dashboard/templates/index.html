@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Email Agent</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; }
+    h1 { margin-bottom: 0.25rem; }
+    .muted { color: #666; margin-bottom: 1.5rem; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; vertical-align: top; }
+    th { background: #f5f5f5; }
+    .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; background: #eef; font-size: 0.85rem; }
+    pre { white-space: pre-wrap; max-width: 40rem; font-size: 0.85rem; }
+    .actions a { margin-right: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Email Agent</h1>
+  <p class="muted">Tenant: {{ tenant.name if tenant else settings.default_tenant_id }}
+    {% if tenant and tenant.gmail_connected %} · Gmail connected{% else %} · Gmail not connected{% endif %}
+  </p>
+
+  <div class="actions">
+    <a href="/auth/google/connect">Connect Gmail</a>
+    <a href="/health">Health</a>
+    <a href="/docs">API docs</a>
+  </div>
+
+  <h2>Message log</h2>
+  {% if logs %}
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Direction</th>
+        <th>Subject</th>
+        <th>Quote</th>
+        <th>Rule</th>
+        <th>Reply preview</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td>{{ log.created_at }}</td>
+        <td><span class="badge">{{ log.direction }}</span></td>
+        <td>{{ log.subject or "—" }}</td>
+        <td>{{ log.quote_amount or "—" }}</td>
+        <td>{{ log.rule_name or "—" }}</td>
+        <td><pre>{{ (log.reply_body or "")[:500] }}</pre></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No messages logged yet.</p>
+  {% endif %}
+</body>
+</html>
