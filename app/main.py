@@ -13,6 +13,8 @@ from app.config import get_settings
 from app.dashboard.routes import router as dashboard_router
 from app.db.models import ProcessedThread, Tenant, get_db, init_db
 from app.scheduler.runner import start_scheduler
+from app.gmail.client import get_gmail_service
+from app.gmail.threads import fetch_full_thread, list_recent_thread_ids
 from app.services.pipeline import poll_unread_threads, process_thread
 
 logging.basicConfig(level=logging.INFO)
@@ -100,6 +102,55 @@ def google_callback(request: Request, db: Session = Depends(get_db)):
         logger.exception("OAuth callback failed")
         raise HTTPException(400, f"OAuth failed: {exc}") from exc
     return RedirectResponse("/dashboard")
+
+
+@app.get("/api/threads/unread")
+def api_list_unread(db: Session = Depends(get_db)):
+    """Step 1 test: confirm Gmail API sees unread threads (no Ollama)."""
+    settings = get_settings()
+    try:
+        gmail = get_gmail_service(db, settings.default_tenant_id)
+        thread_ids = list_recent_thread_ids(gmail, query="is:unread", max_results=10)
+        previews = []
+        for tid in thread_ids[:5]:
+            messages, _ = fetch_full_thread(gmail, tid)
+            latest = messages[-1] if messages else None
+            previews.append(
+                {
+                    "thread_id": tid,
+                    "subject": latest.subject if latest else "",
+                    "from": latest.from_email if latest else "",
+                    "snippet": (latest.body[:200] + "...") if latest and len(latest.body) > 200 else (latest.body if latest else ""),
+                }
+            )
+        return {"count": len(thread_ids), "thread_ids": thread_ids, "previews": previews}
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/threads/{thread_id}/preview")
+def api_preview_thread(thread_id: str, db: Session = Depends(get_db)):
+    """Step 2 test: read full thread from Gmail (no Ollama)."""
+    settings = get_settings()
+    try:
+        gmail = get_gmail_service(db, settings.default_tenant_id)
+        messages, conversation = fetch_full_thread(gmail, thread_id)
+        return {
+            "thread_id": thread_id,
+            "message_count": len(messages),
+            "messages": [
+                {
+                    "from": m.from_email,
+                    "subject": m.subject,
+                    "date": m.date,
+                    "body_preview": m.body[:500],
+                }
+                for m in messages
+            ],
+            "conversation_length": len(conversation),
+        }
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.post("/api/threads/{thread_id}/process")
