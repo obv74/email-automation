@@ -2,14 +2,25 @@
 
 import json
 import logging
+import os
 from typing import Optional
+
+from app.config import get_settings
+
+_settings = get_settings()
+_redirect = _settings.google_redirect_uri.lower()
+if _settings.oauth_allow_insecure_transport or (
+    _redirect.startswith("http://")
+    and "localhost" not in _redirect
+    and "127.0.0.1" not in _redirect
+):
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
 from app.db.models import OAuthToken, Tenant
 
 logger = logging.getLogger(__name__)

@@ -44,6 +44,9 @@ class Settings(BaseSettings):
 
     rules_file: str = "config/rules.yaml"
 
+    # Allow HTTP OAuth redirect (required for http://sslip.io testing). Use HTTPS in production.
+    oauth_allow_insecure_transport: bool = False
+
     @property
     def reminder_day_list(self) -> list[int]:
         return [int(d.strip()) for d in self.reminder_days.split(",") if d.strip()]
