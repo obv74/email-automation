@@ -24,9 +24,9 @@ def dashboard_home(request: Request, db: Session = Depends(get_db)):
         .all()
     )
     return templates.TemplateResponse(
+        request,
         "index.html",
         {
-            "request": request,
             "tenant": tenant,
             "logs": logs,
             "settings": settings,
