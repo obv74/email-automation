@@ -58,10 +58,20 @@ async def _call_ollama(prompt: str) -> str:
         "format": "json",
     }
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(url, json=payload)
-        response.raise_for_status()
-        body = response.json()
+    timeout = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+            body = response.json()
+    except httpx.ConnectError as exc:
+        raise OllamaError(
+            "Cannot connect to Ollama. Run: systemctl start ollama && ollama pull qwen2.5:7b-instruct"
+        ) from exc
+    except httpx.ReadTimeout as exc:
+        raise OllamaError(
+            "Ollama timed out (model may still be loading). Wait 2 min and try again, or run: ollama run qwen2.5:7b-instruct"
+        ) from exc
 
     message = body.get("message", {})
     content = message.get("content", "")

@@ -56,10 +56,22 @@ def root():
 @app.get("/health")
 def health():
     settings = get_settings()
+    ollama_ok = False
+    ollama_detail = "not checked"
+    try:
+        import httpx
+
+        r = httpx.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags", timeout=5.0)
+        ollama_ok = r.status_code == 200
+        ollama_detail = "running" if ollama_ok else f"status {r.status_code}"
+    except Exception as exc:
+        ollama_detail = str(exc)
+
     return {
         "status": "ok",
         "tenant": settings.default_tenant_id,
         "ollama_model": settings.ollama_model,
+        "ollama": ollama_detail,
         "reply_mode": settings.reply_mode,
     }
 
@@ -106,6 +118,12 @@ async def api_poll(db: Session = Depends(get_db)):
         return await poll_unread_threads(db, settings.default_tenant_id)
     except RuntimeError as exc:
         raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Poll failed")
+        raise HTTPException(
+            500,
+            f"Poll failed: {exc}. If Ollama is loading the model, wait 2 min and retry with a long timeout.",
+        ) from exc
 
 
 @app.post("/api/threads/{thread_id}/awaiting-reply")
