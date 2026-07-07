@@ -21,9 +21,10 @@ class Settings(BaseSettings):
     default_tenant_name: str = "Moving Company"
 
     ollama_base_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen2.5:7b-instruct"
+    ollama_model: str = "qwen2.5:3b-instruct"
     ollama_read_timeout_seconds: int = 600
-    ollama_max_thread_chars: int = 12000
+    ollama_max_thread_chars: int = 8000
+    ollama_num_predict: int = 512
 
     google_client_id: str = ""
     google_client_secret: str = ""

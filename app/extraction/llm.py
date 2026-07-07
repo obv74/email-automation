@@ -60,7 +60,8 @@ async def _call_ollama(prompt: str) -> str:
         "format": "json",
         "options": {
             "temperature": 0.1,
-            "num_predict": 800,
+            "num_predict": settings.ollama_num_predict,
+            "num_ctx": 4096,
         },
     }
 

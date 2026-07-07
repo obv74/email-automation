@@ -26,17 +26,14 @@ EXTRACTION_SCHEMA_HINT = """{
 
 
 def build_extraction_prompt(conversation: str) -> str:
-    return f"""Extract job details from this email thread.
+    return f"""Extract moving job fields as JSON only. All keys required. Use null/[] if missing.
 
-Schema:
 {EXTRACTION_SCHEMA_HINT}
 
-Email thread (oldest to newest):
+Email:
 ---
 {conversation}
----
-
-Return JSON only."""
+---"""
 
 
 def build_retry_prompt(conversation: str, error: str) -> str:
