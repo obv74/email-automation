@@ -29,6 +29,8 @@ def _parse_json_response(raw: str) -> dict:
 
 async def extract_job_from_thread(conversation: str) -> ExtractedJob:
     settings = get_settings()
+    if len(conversation) > settings.ollama_max_thread_chars:
+        conversation = conversation[: settings.ollama_max_thread_chars] + "\n...[truncated]"
     prompt = build_extraction_prompt(conversation)
     last_error: Optional[str] = None
 
@@ -56,9 +58,14 @@ async def _call_ollama(prompt: str) -> str:
         ],
         "stream": False,
         "format": "json",
+        "options": {
+            "temperature": 0.1,
+            "num_predict": 800,
+        },
     }
 
-    timeout = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
+    read_timeout = float(settings.ollama_read_timeout_seconds)
+    timeout = httpx.Timeout(connect=10.0, read=read_timeout, write=30.0, pool=10.0)
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(url, json=payload)
@@ -70,7 +77,8 @@ async def _call_ollama(prompt: str) -> str:
         ) from exc
     except httpx.ReadTimeout as exc:
         raise OllamaError(
-            "Ollama timed out (model may still be loading). Wait 2 min and try again, or run: ollama run qwen2.5:7b-instruct"
+            f"Ollama timed out after {settings.ollama_read_timeout_seconds}s. "
+            "CPU inference is slow — retry, or use a smaller model: ollama pull qwen2.5:3b-instruct"
         ) from exc
 
     message = body.get("message", {})
