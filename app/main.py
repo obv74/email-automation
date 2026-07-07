@@ -78,10 +78,12 @@ def google_connect():
 def google_callback(request: Request, db: Session = Depends(get_db)):
     settings = get_settings()
     state = request.query_params.get("state", "")
+    if not state:
+        raise HTTPException(400, "OAuth failed: missing state parameter")
     tenant_id = _oauth_states.pop(state, settings.default_tenant_id)
     authorization_response = str(request.url)
     try:
-        exchange_code(db, tenant_id, authorization_response)
+        exchange_code(db, tenant_id, state, authorization_response)
     except Exception as exc:
         logger.exception("OAuth callback failed")
         raise HTTPException(400, f"OAuth failed: {exc}") from exc

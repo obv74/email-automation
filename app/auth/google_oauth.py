@@ -25,6 +25,9 @@ from app.db.models import OAuthToken, Tenant
 
 logger = logging.getLogger(__name__)
 
+# PKCE: keep the same Flow between /connect and /callback (code_verifier must match).
+_pending_flows: dict[str, Flow] = {}
+
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
@@ -60,7 +63,12 @@ def get_authorization_url(state: str) -> str:
         include_granted_scopes="true",
         prompt="consent",
     )
+    _pending_flows[state] = flow
     return url
+
+
+def pop_pending_flow(state: str) -> Optional[Flow]:
+    return _pending_flows.pop(state, None)
 
 
 def save_credentials(db: Session, tenant_id: str, credentials: Credentials) -> None:
@@ -97,8 +105,15 @@ def load_credentials(db: Session, tenant_id: str) -> Optional[Credentials]:
     return creds
 
 
-def exchange_code(db: Session, tenant_id: str, authorization_response: str) -> Credentials:
-    flow = create_oauth_flow()
+def exchange_code(
+    db: Session,
+    tenant_id: str,
+    state: str,
+    authorization_response: str,
+) -> Credentials:
+    flow = pop_pending_flow(state)
+    if flow is None:
+        raise RuntimeError("OAuth session expired. Click Connect Gmail again.")
     flow.fetch_token(authorization_response=authorization_response)
     creds = flow.credentials
     save_credentials(db, tenant_id, creds)
