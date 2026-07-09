@@ -30,6 +30,7 @@ class Tenant(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
+    owner_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     contact_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     connected_gmail_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     gmail_connected: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -43,6 +44,20 @@ class Tenant(Base):
     message_logs: Mapped[list["MessageLog"]] = relationship(back_populates="tenant")
     scheduled_jobs: Mapped[list["ScheduledJobRecord"]] = relationship(back_populates="tenant")
     processed_threads: Mapped[list["ProcessedThread"]] = relationship(back_populates="tenant")
+    owner: Mapped[Optional["User"]] = relationship(back_populates="tenants")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    tenants: Mapped[list["Tenant"]] = relationship(back_populates="owner")
 
 
 class OAuthToken(Base):
@@ -165,6 +180,7 @@ def _migrate_sqlite(engine) -> None:
     existing = {c["name"] for c in insp.get_columns("tenants")}
     alters = {
         "slug": "VARCHAR(64)",
+        "owner_user_id": "INTEGER",
         "contact_email": "VARCHAR(255)",
         "connected_gmail_email": "VARCHAR(255)",
         "rules_file": "VARCHAR(255)",

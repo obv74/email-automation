@@ -1,0 +1,72 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Building2, LayoutDashboard, LogOut, Mail } from "lucide-react";
+import clsx from "clsx";
+import { getStoredUser, logout } from "@/lib/auth";
+
+const nav = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+];
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const user = getStoredUser();
+
+  return (
+    <div className="flex min-h-screen bg-slate-50">
+      <aside className="hidden w-64 flex-shrink-0 flex-col bg-brand-900 text-white md:flex">
+        <div className="flex items-center gap-3 border-b border-white/10 px-6 py-5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600">
+            <Mail className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold">Email Agent</p>
+            <p className="text-xs text-indigo-200">AI moving quotes</p>
+          </div>
+        </div>
+        <nav className="flex-1 space-y-1 p-4">
+          {nav.map((item) => {
+            const Icon = item.icon;
+            const active = pathname === item.href || pathname.startsWith(item.href + "/");
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={clsx(
+                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition",
+                  active ? "bg-white/15 text-white" : "text-indigo-100 hover:bg-white/10"
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </Link>
+            );
+          })}
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-indigo-100 hover:bg-white/10"
+          >
+            <Building2 className="h-4 w-4" />
+            Companies
+          </Link>
+        </nav>
+        <div className="border-t border-white/10 p-4">
+          <p className="truncate text-sm font-medium">{user?.name || user?.email}</p>
+          <p className="truncate text-xs text-indigo-200">{user?.email}</p>
+          <button
+            onClick={logout}
+            className="mt-3 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-indigo-100 hover:bg-white/10"
+          >
+            <LogOut className="h-4 w-4" />
+            Sign out
+          </button>
+        </div>
+      </aside>
+      <main className="flex-1 overflow-auto">
+        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">{children}</div>
+      </main>
+    </div>
+  );
+}
