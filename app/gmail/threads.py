@@ -128,3 +128,12 @@ def list_recent_thread_ids(gmail, query: str = "is:unread", max_results: int = 2
         .execute()
     )
     return [t["id"] for t in response.get("threads", [])]
+
+
+def mark_thread_as_read(gmail, thread_id: str) -> None:
+    """Remove UNREAD so the next poll does not pick the same thread again."""
+    gmail.users().threads().modify(
+        userId="me",
+        id=thread_id,
+        body={"removeLabelIds": ["UNREAD"]},
+    ).execute()

@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ExtractedJob(BaseModel):
@@ -20,6 +20,20 @@ class ExtractedJob(BaseModel):
     num_movers: Optional[int] = None
     truck_type: Optional[str] = None  # e.g. "16ft", "26ft", "none"
     summary: str = ""
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def summary_not_none(cls, v):
+        return v if v is not None else ""
+
+    @field_validator("inventory", "customer_requests", "promises_made", mode="before")
+    @classmethod
+    def coerce_list(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [v] if v.strip() else []
+        return v
 
     def needs_manual_pricing(self) -> bool:
         return self.num_movers is None or not self.move_date
