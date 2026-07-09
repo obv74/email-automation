@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.google_oauth import load_credentials
 from app.config import get_settings
+from app.tenants.service import get_tenant, tenant_pricing_sheet_id
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +32,10 @@ def _get_sheets_service(db: Session, tenant_id: str):
 
 
 def fetch_pricing_rows(db: Session, tenant_id: str, sheet_id: Optional[str] = None) -> list[dict[str, Any]]:
-    settings = get_settings()
-    sid = sheet_id or settings.pricing_sheet_id
+    tenant = get_tenant(db, tenant_id)
+    sid = sheet_id or (tenant_pricing_sheet_id(tenant) if tenant else None) or get_settings().pricing_sheet_id
     if not sid:
-        raise RuntimeError("PRICING_SHEET_ID is not configured")
+        raise RuntimeError("PRICING_SHEET_ID is not configured for this company")
 
     service = _get_sheets_service(db, tenant_id)
     result = (

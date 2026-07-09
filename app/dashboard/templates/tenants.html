@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Email Agent — Companies</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; max-width: 56rem; }
+    h1 { margin-bottom: 0.25rem; }
+    .muted { color: #666; margin-bottom: 1.5rem; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
+    th, td { border: 1px solid #ddd; padding: 0.6rem; text-align: left; }
+    th { background: #f5f5f5; }
+    a { color: #3366cc; }
+    form { display: grid; gap: 0.5rem; max-width: 28rem; margin-top: 1rem; }
+    input { padding: 0.5rem; }
+    button { padding: 0.5rem 1rem; width: fit-content; }
+  </style>
+</head>
+<body>
+  <h1>Email Agent</h1>
+  <p class="muted">One VPS — many moving companies. Each company has its own Gmail, Sheet, and message log.</p>
+
+  <h2>Companies</h2>
+  {% if tenants %}
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Slug</th>
+        <th>Gmail</th>
+        <th>Sheet</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tenants %}
+      <tr>
+        <td>{{ t.name }}</td>
+        <td>{{ t.slug }}</td>
+        <td>{% if t.gmail_connected %}{{ t.connected_gmail_email or "connected" }}{% else %}not connected{% endif %}</td>
+        <td>{{ t.pricing_sheet_id or "—" }}</td>
+        <td><a href="/dashboard/{{ t.slug }}">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No companies yet.</p>
+  {% endif %}
+
+  <h2>Add company</h2>
+  <form method="post" action="/dashboard/companies">
+    <input name="name" placeholder="Company name (e.g. Buddy Moving)" required>
+    <input name="slug" placeholder="URL slug (optional, e.g. buddy-moving)">
+    <input name="pricing_sheet_id" placeholder="Google Sheet ID for pricing">
+    <input name="contact_email" placeholder="Owner contact email">
+    <button type="submit">Create company</button>
+  </form>
+</body>
+</html>

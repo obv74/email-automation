@@ -37,8 +37,8 @@ def render_template(template: str, job: ExtractedJob, quote: Optional[str]) -> s
     return body
 
 
-def generate_reply(job: ExtractedJob, quote: Optional[str]) -> tuple[str, str]:
-    rules = load_rules()
+def generate_reply(job: ExtractedJob, quote: Optional[str], rules_file: Optional[str] = None) -> tuple[str, str]:
+    rules = load_rules(rules_file)
     template_name = pick_template_name(job.summary or "", rules)
     templates: dict[str, Any] = rules.get("templates", {})
     template_body = templates.get(template_name, templates.get("default", ""))

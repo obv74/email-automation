@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import FollowupLog, MessageLog, ProcessedThread, ReminderLog, ScheduledJobRecord, SessionLocal
+from app.tenants.service import get_tenant, tenant_pricing_sheet_id, tenant_reply_mode
 from app.gmail.client import get_gmail_service
 from app.gmail.drafts import create_draft, send_message
 from app.services.pipeline import poll_unread_threads
@@ -17,11 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 def _send_email(db: Session, tenant_id: str, to: str, subject: str, body: str, direction: str) -> None:
-    settings = get_settings()
+    tenant = get_tenant(db, tenant_id)
+    reply_mode = tenant_reply_mode(tenant) if tenant else get_settings().reply_mode
     gmail = get_gmail_service(db, tenant_id)
     draft_id = None
     message_id = None
-    if settings.reply_mode == "send":
+    if reply_mode == "send":
         sent = send_message(gmail, to, subject, body)
         message_id = sent.get("id")
     else:
@@ -43,8 +45,9 @@ def _send_email(db: Session, tenant_id: str, to: str, subject: str, body: str, d
 
 def sync_jobs_from_sheet(db: Session, tenant_id: str) -> int:
     """Import booked jobs from a 'Jobs' tab on the pricing sheet."""
-    settings = get_settings()
-    if not settings.pricing_sheet_id:
+    tenant = get_tenant(db, tenant_id)
+    sheet_id = tenant_pricing_sheet_id(tenant) if tenant else get_settings().pricing_sheet_id
+    if not sheet_id:
         return 0
 
     from googleapiclient.discovery import build
@@ -58,7 +61,7 @@ def sync_jobs_from_sheet(db: Session, tenant_id: str) -> int:
     result = (
         service.spreadsheets()
         .values()
-        .get(spreadsheetId=settings.pricing_sheet_id, range="Jobs!A:F")
+        .get(spreadsheetId=sheet_id, range="Jobs!A:F")
         .execute()
     )
     values = result.get("values", [])
@@ -230,15 +233,41 @@ def run_followup_check(tenant_id: str) -> None:
         db.close()
 
 
-async def run_gmail_poll(tenant_id: str) -> None:
+def run_gmail_poll_sync(_unused: str = "") -> None:
+    asyncio.run(run_gmail_poll_all())
+
+
+async def run_gmail_poll_all() -> None:
     db = SessionLocal()
     try:
-        await poll_unread_threads(db, tenant_id)
-    except Exception as exc:
-        logger.exception("Gmail poll failed: %s", exc)
+        from app.tenants.service import list_pollable_tenants
+
+        for tenant in list_pollable_tenants(db):
+            try:
+                await poll_unread_threads(db, tenant.id)
+            except Exception as exc:
+                logger.exception("Gmail poll failed for %s: %s", tenant.slug, exc)
     finally:
         db.close()
 
 
-def run_gmail_poll_sync(tenant_id: str) -> None:
-    asyncio.run(run_gmail_poll(tenant_id))
+def run_reminder_check_all(_unused: str = "") -> None:
+    db = SessionLocal()
+    try:
+        from app.tenants.service import list_pollable_tenants
+
+        for tenant in list_pollable_tenants(db):
+            run_reminder_check(tenant.id)
+    finally:
+        db.close()
+
+
+def run_followup_check_all(_unused: str = "") -> None:
+    db = SessionLocal()
+    try:
+        from app.tenants.service import list_pollable_tenants
+
+        for tenant in list_pollable_tenants(db):
+            run_followup_check(tenant.id)
+    finally:
+        db.close()

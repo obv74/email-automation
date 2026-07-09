@@ -8,9 +8,9 @@ import yaml
 from app.config import get_settings
 
 
-def load_rules() -> dict[str, Any]:
+def load_rules(rules_file: Optional[str] = None) -> dict[str, Any]:
     settings = get_settings()
-    path = Path(settings.rules_file)
+    path = Path(rules_file or settings.rules_file)
     if not path.exists():
         return {"default_template": "default", "templates": {}}
     with path.open("r", encoding="utf-8") as f:

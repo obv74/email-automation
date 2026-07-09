@@ -18,22 +18,23 @@
 </head>
 <body>
   <h1>Email Agent</h1>
-  <p class="muted">Tenant: {{ tenant.name if tenant else settings.default_tenant_id }}
-    {% if tenant and tenant.gmail_connected %} · Gmail connected{% else %} · Gmail not connected{% endif %}
+  <p class="muted">Company: <strong>{{ tenant.name }}</strong> ({{ tenant.slug }})
+    {% if tenant.gmail_connected %} · Gmail: {{ tenant.connected_gmail_email or "connected" }}{% else %} · Gmail not connected{% endif %}
   </p>
 
   <div class="actions">
-    {% if tenant and tenant.gmail_connected %}
-    <a href="/auth/google/connect">Switch Gmail account</a>
-    <a href="/auth/google/disconnect">Disconnect Gmail</a>
+    <a href="/dashboard">All companies</a>
+    {% if tenant.gmail_connected %}
+    <a href="/auth/google/connect?tenant={{ tenant.slug }}">Switch Gmail</a>
+    <a href="/auth/google/disconnect?tenant={{ tenant.slug }}">Disconnect Gmail</a>
     {% else %}
-    <a href="/auth/google/connect">Connect Gmail</a>
+    <a href="/auth/google/connect?tenant={{ tenant.slug }}">Connect Gmail</a>
     {% endif %}
     <a href="/health">Health</a>
     <a href="/docs">API docs</a>
   </div>
-  {% if tenant and tenant.gmail_connected %}
-  <p class="muted">To use a <strong>different</strong> Gmail: open an <strong>Incognito</strong> window, sign into that Gmail, then click <strong>Switch Gmail account</strong>.</p>
+  {% if tenant.gmail_connected %}
+  <p class="muted">Different Gmail? Use <strong>Incognito</strong> → Switch Gmail account.</p>
   {% endif %}
 
   <h2>Message log</h2>

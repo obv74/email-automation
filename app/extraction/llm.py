@@ -47,23 +47,63 @@ async def extract_job_from_thread(conversation: str) -> ExtractedJob:
     raise OllamaError(f"Failed to extract valid job JSON after retries: {last_error}")
 
 
-async def _call_ollama(prompt: str) -> str:
+async def is_moving_inquiry(conversation: str) -> tuple[bool, str]:
+    """Fast Ollama check: is this thread a moving-company customer inquiry?"""
+    settings = get_settings()
+    if not settings.classify_enabled:
+        return True, "classification disabled"
+
+    snippet = conversation[: settings.classify_max_chars]
+    prompt = f"""Does this email thread look like a customer inquiry for a MOVING company?
+Examples YES: quote request, move date, load/unload addresses, movers, packing, inventory for a move.
+Examples NO: marketing newsletter, vendor invoice, personal chat, recruiting spam, unrelated business.
+
+Return JSON only:
+{{"is_moving_inquiry": true or false, "reason": "one short sentence"}}
+
+Email thread:
+---
+{snippet}
+---"""
+
+    try:
+        raw = await _call_ollama(
+            prompt,
+            system="You classify whether emails are moving-company customer inquiries.",
+            num_predict=80,
+            use_json_format=True,
+        )
+        data = _parse_json_response(raw)
+        return bool(data.get("is_moving_inquiry")), str(data.get("reason", ""))
+    except Exception as exc:
+        logger.warning("Classification failed, treating as inquiry: %s", exc)
+        return True, "classification error — processed anyway"
+
+
+async def _call_ollama(
+    prompt: str,
+    *,
+    system: str = "You are a precise data extraction assistant.",
+    num_predict: Optional[int] = None,
+    use_json_format: bool = True,
+) -> str:
     settings = get_settings()
     url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
-    payload = {
+    payload: dict = {
         "model": settings.ollama_model,
         "messages": [
-            {"role": "system", "content": "You are a precise data extraction assistant."},
+            {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
         "stream": False,
-        "format": "json",
         "options": {
             "temperature": 0.1,
-            "num_predict": settings.ollama_num_predict,
+            "num_predict": num_predict or settings.ollama_num_predict,
             "num_ctx": 4096,
         },
     }
+    if use_json_format:
+        payload["format"] = "json"
 
     read_timeout = float(settings.ollama_read_timeout_seconds)
     timeout = httpx.Timeout(connect=10.0, read=read_timeout, write=30.0, pool=10.0)

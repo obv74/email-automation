@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import MessageLog, ProcessedThread
-from app.extraction.llm import extract_job_from_thread
+from app.tenants.service import get_tenant, tenant_reply_mode
+from app.extraction.llm import extract_job_from_thread, is_moving_inquiry
 from app.gmail.client import get_gmail_service
 from app.gmail.drafts import create_draft, send_message
 from app.gmail.threads import fetch_full_thread, list_recent_thread_ids, mark_thread_as_read
@@ -33,8 +34,8 @@ def _should_skip_thread(
         return None
     if existing.last_message_id != latest_message_id:
         return None  # new reply in thread — reprocess
-    if existing.status == "processed":
-        return "already processed"
+    if existing.status in ("processed", "ignored"):
+        return f"already {existing.status}"
     if existing.status == "processing":
         age = datetime.utcnow() - existing.processed_at
         if age < timedelta(minutes=PROCESSING_STALE_MINUTES):
@@ -78,6 +79,47 @@ def _release_thread_claim(db: Session, row: ProcessedThread, success: bool) -> N
     db.commit()
 
 
+def _mark_ignored(
+    db: Session,
+    tenant_id: str,
+    thread_id: str,
+    message_id: str,
+    subject: str,
+    reason: str,
+) -> None:
+    existing = (
+        db.query(ProcessedThread)
+        .filter(
+            ProcessedThread.tenant_id == tenant_id,
+            ProcessedThread.gmail_thread_id == thread_id,
+        )
+        .first()
+    )
+    if existing:
+        existing.last_message_id = message_id
+        existing.status = "ignored"
+        existing.processed_at = datetime.utcnow()
+    else:
+        db.add(
+            ProcessedThread(
+                tenant_id=tenant_id,
+                gmail_thread_id=thread_id,
+                last_message_id=message_id,
+                status="ignored",
+            )
+        )
+    db.add(
+        MessageLog(
+            tenant_id=tenant_id,
+            gmail_thread_id=thread_id,
+            direction="ignored",
+            subject=subject,
+            reply_body=reason,
+        )
+    )
+    db.commit()
+
+
 async def process_thread(db: Session, tenant_id: str, thread_id: str, force: bool = False) -> dict:
     gmail = get_gmail_service(db, tenant_id)
     messages, conversation = fetch_full_thread(gmail, thread_id)
@@ -97,23 +139,39 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
     if skip_reason:
         return {"status": "skipped", "thread_id": thread_id, "reason": skip_reason}
 
+    is_job, classify_reason = await is_moving_inquiry(conversation)
+    if not is_job and not force:
+        _mark_ignored(db, tenant_id, thread_id, latest.message_id, latest.subject, classify_reason)
+        try:
+            mark_thread_as_read(gmail, thread_id)
+        except Exception as exc:
+            logger.warning("Could not mark thread read %s: %s", thread_id, exc)
+        return {
+            "status": "ignored",
+            "thread_id": thread_id,
+            "reason": classify_reason,
+        }
+
     claim = _claim_thread(db, tenant_id, thread_id, latest.message_id)
 
     try:
         job = await extract_job_from_thread(conversation)
         pricing_rows = fetch_pricing_rows(db, tenant_id)
         quote = compute_quote(job, pricing_rows)
-        rule_name, reply_body = generate_reply(job, quote)
+        tenant_row = get_tenant(db, tenant_id)
+        rule_name, reply_body = generate_reply(
+            job, quote, rules_file=tenant_row.rules_file if tenant_row else None
+        )
 
         subject = latest.subject if latest.subject.lower().startswith("re:") else f"Re: {latest.subject}"
         to_email = job.customer_email or latest.from_email
 
-        settings = get_settings()
+        reply_mode = tenant_reply_mode(tenant_row) if tenant_row else get_settings().reply_mode
         draft_id = None
         message_id = None
         direction = "draft"
 
-        if settings.reply_mode == "send":
+        if reply_mode == "send":
             sent = send_message(gmail, to_email, subject, reply_body, thread_id)
             message_id = sent.get("id")
             direction = "outbound"
@@ -157,9 +215,22 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
         raise
 
 
+async def poll_all_tenants(db: Session) -> dict[str, list[dict]]:
+    from app.tenants.service import list_pollable_tenants
+
+    out: dict[str, list[dict]] = {}
+    for tenant in list_pollable_tenants(db):
+        try:
+            out[tenant.slug] = await poll_unread_threads(db, tenant.id)
+        except Exception as exc:
+            logger.exception("Poll failed for tenant %s: %s", tenant.slug, exc)
+            out[tenant.slug] = [{"status": "error", "error": str(exc)}]
+    return out
+
+
 async def poll_unread_threads(db: Session, tenant_id: str) -> list[dict]:
     gmail = get_gmail_service(db, tenant_id)
-    thread_ids = list_recent_thread_ids(gmail, query="is:unread", max_results=10)
+    thread_ids = list_recent_thread_ids(gmail, query="is:unread in:inbox", max_results=10)
     results = []
     for tid in thread_ids:
         try:

@@ -86,6 +86,14 @@ def save_credentials(db: Session, tenant_id: str, credentials: Credentials) -> N
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if tenant:
         tenant.gmail_connected = True
+        try:
+            from googleapiclient.discovery import build
+
+            gmail = build("gmail", "v1", credentials=credentials, cache_discovery=False)
+            profile = gmail.users().getProfile(userId="me").execute()
+            tenant.connected_gmail_email = profile.get("emailAddress")
+        except Exception as exc:
+            logger.warning("Could not read Gmail profile for tenant %s: %s", tenant_id, exc)
     db.commit()
 
 

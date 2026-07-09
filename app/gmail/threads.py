@@ -120,7 +120,7 @@ def fetch_full_thread(gmail, thread_id: str) -> tuple[list[ParsedMessage], str]:
     return parsed, conversation
 
 
-def list_recent_thread_ids(gmail, query: str = "is:unread", max_results: int = 20) -> list[str]:
+def list_recent_thread_ids(gmail, query: str = "is:unread in:inbox", max_results: int = 20) -> list[str]:
     response = (
         gmail.users()
         .threads()

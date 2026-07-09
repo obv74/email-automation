@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     ollama_max_thread_chars: int = 8000
     ollama_num_predict: int = 512
 
+    classify_enabled: bool = True
+    classify_max_chars: int = 2500
+
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
