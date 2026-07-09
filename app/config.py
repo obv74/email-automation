@@ -15,6 +15,10 @@ class Settings(BaseSettings):
 
     app_secret_key: str = "change-me"
     app_base_url: str = "http://localhost:8000"
+    frontend_url: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
     database_url: str = "sqlite:///./data/email_agent.db"
 
     default_tenant_id: str = "default"
@@ -56,6 +60,10 @@ class Settings(BaseSettings):
     @property
     def reminder_day_list(self) -> list[int]:
         return [int(d.strip()) for d in self.reminder_days.split(",") if d.strip()]
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
     def data_dir(self) -> Path:

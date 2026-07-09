@@ -5,7 +5,6 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
 from app.db.models import Tenant
 
 
@@ -40,6 +39,26 @@ def list_tenants(db: Session, active_only: bool = True) -> list[Tenant]:
     return q.all()
 
 
+def list_tenants_for_user(db: Session, user_id: int, active_only: bool = True) -> list[Tenant]:
+    q = db.query(Tenant).filter(Tenant.owner_user_id == user_id).order_by(Tenant.name)
+    if active_only:
+        q = q.filter(Tenant.is_active.is_(True))
+    return q.all()
+
+
+def tenant_to_dict(tenant: Tenant) -> dict:
+    return {
+        "id": tenant.id,
+        "slug": tenant.slug,
+        "name": tenant.name,
+        "gmail_connected": tenant.gmail_connected,
+        "connected_gmail_email": tenant.connected_gmail_email,
+        "pricing_sheet_id": tenant.pricing_sheet_id,
+        "is_active": tenant.is_active,
+        "reply_mode": tenant.reply_mode,
+    }
+
+
 def list_pollable_tenants(db: Session) -> list[Tenant]:
     return (
         db.query(Tenant)
@@ -55,7 +74,10 @@ def create_tenant(
     slug: Optional[str] = None,
     pricing_sheet_id: Optional[str] = None,
     contact_email: Optional[str] = None,
+    owner_user_id: Optional[int] = None,
 ) -> Tenant:
+    from app.config import get_settings
+
     settings = get_settings()
     final_slug = slugify(slug or name)
     if db.query(Tenant).filter(Tenant.slug == final_slug).first():
@@ -69,6 +91,7 @@ def create_tenant(
         contact_email=contact_email,
         reply_mode=settings.reply_mode,
         is_active=True,
+        owner_user_id=owner_user_id,
     )
     db.add(tenant)
     db.commit()
@@ -76,10 +99,23 @@ def create_tenant(
     return tenant
 
 
+def assign_orphan_tenants_to_user(db: Session, user_id: int) -> int:
+    orphans = db.query(Tenant).filter(Tenant.owner_user_id.is_(None)).all()
+    for tenant in orphans:
+        tenant.owner_user_id = user_id
+    if orphans:
+        db.commit()
+    return len(orphans)
+
+
 def tenant_pricing_sheet_id(tenant: Tenant) -> Optional[str]:
+    from app.config import get_settings
+
     settings = get_settings()
     return tenant.pricing_sheet_id or settings.pricing_sheet_id or None
 
 
 def tenant_reply_mode(tenant: Tenant) -> str:
+    from app.config import get_settings
+
     return tenant.reply_mode or get_settings().reply_mode

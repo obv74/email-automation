@@ -1,18 +1,9 @@
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-*.egg-info/
-
-# App data
-data/
+web/node_modules
+web/.next
+web/.env.local
 .env
-
-# IDE
-.idea/
-.vscode/
-*.swp
-
-# OS
-.DS_Store
+data/
+.venv/
+__pycache__/
+*.pyc
+*.db
