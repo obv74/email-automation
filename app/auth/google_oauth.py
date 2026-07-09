@@ -61,7 +61,7 @@ def get_authorization_url(state: str) -> str:
     url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
-        prompt="consent",
+        prompt="consent select_account",
     )
     _pending_flows[state] = flow
     return url
@@ -118,3 +118,14 @@ def exchange_code(
     creds = flow.credentials
     save_credentials(db, tenant_id, creds)
     return creds
+
+
+def disconnect_gmail(db: Session, tenant_id: str) -> None:
+    db.query(OAuthToken).filter(
+        OAuthToken.tenant_id == tenant_id,
+        OAuthToken.provider == "google",
+    ).delete()
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if tenant:
+        tenant.gmail_connected = False
+    db.commit()

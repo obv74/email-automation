@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.auth.google_oauth import exchange_code, get_authorization_url
+from app.auth.google_oauth import disconnect_gmail, exchange_code, get_authorization_url
 from app.config import get_settings
 from app.dashboard.routes import router as dashboard_router
 from app.db.models import ProcessedThread, Tenant, get_db, init_db
@@ -76,6 +76,14 @@ def health():
         "ollama": ollama_detail,
         "reply_mode": settings.reply_mode,
     }
+
+
+@app.get("/auth/google/disconnect")
+def google_disconnect(db: Session = Depends(get_db)):
+    """Remove saved Gmail token so you can connect a different account."""
+    settings = get_settings()
+    disconnect_gmail(db, settings.default_tenant_id)
+    return RedirectResponse("/dashboard")
 
 
 @app.get("/auth/google/connect")

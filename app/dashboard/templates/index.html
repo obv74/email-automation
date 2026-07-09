@@ -23,10 +23,18 @@
   </p>
 
   <div class="actions">
+    {% if tenant and tenant.gmail_connected %}
+    <a href="/auth/google/connect">Switch Gmail account</a>
+    <a href="/auth/google/disconnect">Disconnect Gmail</a>
+    {% else %}
     <a href="/auth/google/connect">Connect Gmail</a>
+    {% endif %}
     <a href="/health">Health</a>
     <a href="/docs">API docs</a>
   </div>
+  {% if tenant and tenant.gmail_connected %}
+  <p class="muted">To use a <strong>different</strong> Gmail: open an <strong>Incognito</strong> window, sign into that Gmail, then click <strong>Switch Gmail account</strong>.</p>
+  {% endif %}
 
   <h2>Message log</h2>
   {% if logs %}
