@@ -37,6 +37,8 @@ class Tenant(Base):
     pricing_sheet_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     rules_file: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     reply_mode: Mapped[str] = mapped_column(String(16), default="draft")
+    poll_interval_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_polled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -96,8 +98,9 @@ class MessageLog(Base):
     gmail_thread_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     gmail_message_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     gmail_draft_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    direction: Mapped[str] = mapped_column(String(16))  # inbound | outbound | draft | reminder | followup
+    direction: Mapped[str] = mapped_column(String(16))  # inbound | outbound | draft | reminder | followup | ignored
     subject: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    inbound_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     extraction_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     quote_amount: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     reply_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -185,6 +188,8 @@ def _migrate_sqlite(engine) -> None:
         "connected_gmail_email": "VARCHAR(255)",
         "rules_file": "VARCHAR(255)",
         "reply_mode": "VARCHAR(16) DEFAULT 'draft'",
+        "poll_interval_minutes": "INTEGER",
+        "last_polled_at": "DATETIME",
         "is_active": "BOOLEAN DEFAULT 1",
     }
     with engine.begin() as conn:
@@ -194,6 +199,12 @@ def _migrate_sqlite(engine) -> None:
         conn.execute(text("UPDATE tenants SET slug = id WHERE slug IS NULL OR slug = ''"))
         conn.execute(text("UPDATE tenants SET is_active = 1 WHERE is_active IS NULL"))
         conn.execute(text("UPDATE tenants SET reply_mode = 'draft' WHERE reply_mode IS NULL OR reply_mode = ''"))
+
+    if "message_logs" in insp.get_table_names():
+        log_cols = {c["name"] for c in insp.get_columns("message_logs")}
+        if "inbound_body" not in log_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE message_logs ADD COLUMN inbound_body TEXT"))
 
 
 def get_db():

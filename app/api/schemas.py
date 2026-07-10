@@ -37,6 +37,13 @@ class CreateTenantBody(BaseModel):
     contact_email: Optional[EmailStr] = None
 
 
+class UpdateTenantBody(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    pricing_sheet_id: Optional[str] = None
+    reply_mode: Optional[str] = None
+    poll_interval_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+
+
 class TenantOut(BaseModel):
     id: str
     slug: str
@@ -44,8 +51,10 @@ class TenantOut(BaseModel):
     gmail_connected: bool
     connected_gmail_email: Optional[str]
     pricing_sheet_id: Optional[str]
+    pricing_sheet_url: Optional[str]
     is_active: bool
     reply_mode: str
+    poll_interval_minutes: int
 
 
 class MessageLogOut(BaseModel):
@@ -55,5 +64,12 @@ class MessageLogOut(BaseModel):
     quote_amount: Optional[str]
     rule_name: Optional[str]
     reply_body: Optional[str]
+    inbound_body: Optional[str]
+    summary: Optional[str]
+    extraction_json: Optional[str]
     gmail_thread_id: Optional[str]
+    gmail_draft_id: Optional[str]
+    gmail_message_id: Optional[str]
+    draft_exists: Optional[bool]
+    can_send: bool
     created_at: datetime

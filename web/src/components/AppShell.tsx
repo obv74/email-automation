@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, LayoutDashboard, LogOut, Mail } from "lucide-react";
+import { LayoutDashboard, LogOut, Mail, Settings } from "lucide-react";
 import clsx from "clsx";
 import { getStoredUser, logout } from "@/lib/auth";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -29,7 +30,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <nav className="flex-1 space-y-1 p-4">
           {nav.map((item) => {
             const Icon = item.icon;
-            const active = pathname === item.href || pathname.startsWith(item.href + "/");
+            const active = pathname === item.href;
             return (
               <Link
                 key={item.href}
@@ -44,13 +45,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-indigo-100 hover:bg-white/10"
-          >
-            <Building2 className="h-4 w-4" />
-            Companies
-          </Link>
         </nav>
         <div className="border-t border-white/10 p-4">
           <p className="truncate text-sm font-medium">{user?.name || user?.email}</p>

@@ -24,3 +24,14 @@ def create_draft(gmail, to: str, subject: str, body: str, thread_id: Optional[st
 def send_message(gmail, to: str, subject: str, body: str, thread_id: Optional[str] = None) -> dict:
     payload = _build_raw_message(to, subject, body, thread_id)
     return gmail.users().messages().send(userId="me", body=payload).execute()
+
+
+def send_draft(gmail, draft_id: str) -> dict:
+    return gmail.users().drafts().send(userId="me", body={"id": draft_id}).execute()
+
+
+def get_draft(gmail, draft_id: str) -> Optional[dict]:
+    try:
+        return gmail.users().drafts().get(userId="me", id=draft_id).execute()
+    except Exception:
+        return None

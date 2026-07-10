@@ -7,7 +7,7 @@ from app.api.schemas import LoginRequest, RegisterRequest, TokenResponse, UserOu
 from app.auth.deps import get_current_user
 from app.auth.jwt_tokens import create_access_token
 from app.auth.password import hash_password, verify_password
-from app.tenants.service import assign_orphan_tenants_to_user
+from app.tenants.service import create_tenant, slugify
 from app.db.models import User, get_db
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -31,7 +31,13 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
-    assign_orphan_tenants_to_user(db, user.id)
+    create_tenant(
+        db,
+        name=body.name.strip(),
+        slug=slugify(f"{body.name}-{user.id}"),
+        contact_email=email,
+        owner_user_id=user.id,
+    )
 
     token = create_access_token(str(user.id))
     return TokenResponse(access_token=token, user=_user_out(user))
