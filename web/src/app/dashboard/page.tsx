@@ -32,8 +32,10 @@ function DashboardContent() {
     const token = getToken();
     if (!token || !company) return;
     setLogsLoading(true);
+    setLogs([]); // clear stale rows while refreshing
     try {
-      setLogs(await api.getLogs(token, company.slug));
+      const next = await api.getLogs(token, company.slug);
+      setLogs(next.filter((log) => log.direction !== "discarded"));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load messages");
     } finally {

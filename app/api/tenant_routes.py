@@ -165,7 +165,6 @@ def api_tenant_logs(
         .filter(
             MessageLog.tenant_id == tenant.id,
             MessageLog.direction == "draft",
-            MessageLog.gmail_draft_id.isnot(None),
         )
         .all()
     )
@@ -176,7 +175,13 @@ def api_tenant_logs(
         except RuntimeError as exc:
             logger.warning("Draft sync skipped for %s: %s", tenant_slug, exc)
 
-    # Re-query so discarded rows are never returned
+    # Also drop any leftover discarded rows from older sync versions
+    db.query(MessageLog).filter(
+        MessageLog.tenant_id == tenant.id,
+        MessageLog.direction == "discarded",
+    ).delete(synchronize_session=False)
+    db.commit()
+
     logs = (
         db.query(MessageLog)
         .filter(

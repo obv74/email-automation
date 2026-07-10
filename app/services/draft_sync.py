@@ -11,8 +11,8 @@ from app.gmail.drafts import get_draft
 logger = logging.getLogger(__name__)
 
 
-def thread_has_sent_reply(gmail, thread_id: Optional[str], reply_body: Optional[str] = None) -> Optional[str]:
-    """Return Gmail message id if the thread has an outbound SENT message (manual or API send)."""
+def thread_has_sent_reply(gmail, thread_id: Optional[str]) -> Optional[str]:
+    """Return Gmail message id if the thread has an outbound SENT message."""
     if not thread_id:
         return None
     try:
@@ -22,9 +22,8 @@ def thread_has_sent_reply(gmail, thread_id: Optional[str], reply_body: Optional[
             .get(userId="me", id=thread_id, format="metadata", metadataHeaders=["Subject"])
             .execute()
         )
-    except Exception as exc:
-        # Thread deleted/trashed in Gmail — treat as not sent
-        logger.info("Thread %s not found during draft sync (%s)", thread_id, type(exc).__name__)
+    except Exception:
+        # Thread deleted/trashed — not sent
         return None
 
     for msg in thread.get("messages") or []:
@@ -34,44 +33,44 @@ def thread_has_sent_reply(gmail, thread_id: Optional[str], reply_body: Optional[
     return None
 
 
-def sync_draft_log(gmail, log: MessageLog) -> MessageLog:
+def sync_draft_log(db: Session, gmail, log: MessageLog) -> str:
     """
-    Align a draft MessageLog with Gmail:
-    - draft still exists → keep as draft
-    - draft gone + SENT in thread → mark outbound (Sent)
-    - draft gone + no SENT → mark discarded (deleted in Gmail)
+    Align a draft MessageLog with Gmail.
+    Returns: kept | sent | deleted
     """
-    if log.direction != "draft" or not log.gmail_draft_id:
-        return log
+    if log.direction != "draft":
+        return "kept"
+
+    # No draft id — cannot verify; remove from dashboard
+    if not log.gmail_draft_id:
+        logger.info("Draft log %s has no gmail_draft_id — deleting from dashboard", log.id)
+        db.delete(log)
+        return "deleted"
 
     draft = get_draft(gmail, log.gmail_draft_id)
     if draft is not None:
-        return log
+        return "kept"
 
-    sent_id = thread_has_sent_reply(gmail, log.gmail_thread_id, log.reply_body)
+    sent_id = thread_has_sent_reply(gmail, log.gmail_thread_id)
     if sent_id:
         log.direction = "outbound"
         log.gmail_message_id = sent_id
         log.gmail_draft_id = None
         logger.info("Draft log %s synced as sent (Gmail message %s)", log.id, sent_id)
-    else:
-        log.direction = "discarded"
-        log.gmail_draft_id = None
-        logger.info("Draft log %s synced as discarded (draft deleted in Gmail)", log.id)
-    return log
+        return "sent"
+
+    # Draft deleted in Gmail (and thread missing or no SENT) — remove from dashboard
+    logger.info("Draft log %s deleted from dashboard (Gmail draft gone)", log.id)
+    db.delete(log)
+    return "deleted"
 
 
-def sync_draft_logs(db: Session, gmail, logs: list[MessageLog]) -> list[MessageLog]:
-    changed = False
-    for log in logs:
-        if log.direction != "draft" or not log.gmail_draft_id:
-            continue
-        before = (log.direction, log.gmail_draft_id, log.gmail_message_id)
-        sync_draft_log(gmail, log)
-        after = (log.direction, log.gmail_draft_id, log.gmail_message_id)
-        if before != after:
-            changed = True
-            db.add(log)
-    if changed:
+def sync_draft_logs(db: Session, gmail, logs: list[MessageLog]) -> dict[str, int]:
+    counts = {"kept": 0, "sent": 0, "deleted": 0}
+    for log in list(logs):
+        result = sync_draft_log(db, gmail, log)
+        counts[result] = counts.get(result, 0) + 1
+    if counts["sent"] or counts["deleted"]:
         db.commit()
-    return logs
+    logger.info("Draft sync done: %s", counts)
+    return counts
