@@ -10,6 +10,7 @@ function directionBadge(direction: string) {
     draft: "bg-blue-50 text-blue-700 ring-blue-600/20",
     outbound: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
     ignored: "bg-slate-100 text-slate-600 ring-slate-500/10",
+    discarded: "bg-slate-100 text-slate-500 ring-slate-500/10",
     reminder: "bg-purple-50 text-purple-700 ring-purple-600/20",
     followup: "bg-orange-50 text-orange-700 ring-orange-600/20",
   };
@@ -19,8 +20,8 @@ function directionBadge(direction: string) {
 function draftStatus(log: MessageLog) {
   if (log.direction === "outbound") return { label: "Sent", className: "text-emerald-600" };
   if (log.direction === "ignored") return { label: "Skipped", className: "text-slate-500" };
-  if (log.gmail_draft_id && log.draft_exists === false) return { label: "Draft removed", className: "text-amber-600" };
-  if (log.gmail_draft_id || log.direction === "draft") return { label: "Draft in Gmail", className: "text-blue-600" };
+  if (log.direction === "discarded") return { label: "Deleted", className: "text-slate-500" };
+  if (log.direction === "draft") return { label: "Draft in Gmail", className: "text-blue-600" };
   return { label: log.direction, className: "text-slate-500" };
 }
 
