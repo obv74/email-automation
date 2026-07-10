@@ -14,7 +14,7 @@ from app.db.models import MessageLog, ProcessedThread, User, get_db
 from app.gmail.client import get_gmail_service
 from app.gmail.drafts import send_draft, send_message
 from app.gmail.threads import fetch_full_thread, list_recent_thread_ids
-from app.services.draft_sync import sync_draft_logs
+from app.services.draft_sync import purge_logs_for_missing_threads, sync_draft_logs
 from app.services.pipeline import poll_unread_threads, process_thread
 from app.tenants.service import (
     create_tenant,
@@ -159,23 +159,40 @@ def api_tenant_logs(
 ):
     tenant = require_tenant_access(db, user, tenant_slug)
 
-    # Sync draft rows with live Gmail before returning the list
-    draft_candidates = (
-        db.query(MessageLog)
-        .filter(
-            MessageLog.tenant_id == tenant.id,
-            MessageLog.direction == "draft",
-        )
-        .all()
-    )
-    if tenant.gmail_connected and draft_candidates:
+    if tenant.gmail_connected:
         try:
             gmail = get_gmail_service(db, tenant.id)
-            sync_draft_logs(db, gmail, draft_candidates)
-        except RuntimeError as exc:
-            logger.warning("Draft sync skipped for %s: %s", tenant_slug, exc)
 
-    # Also drop any leftover discarded rows from older sync versions
+            # 1) Sync drafts with Gmail Drafts folder
+            draft_candidates = (
+                db.query(MessageLog)
+                .filter(
+                    MessageLog.tenant_id == tenant.id,
+                    MessageLog.direction == "draft",
+                )
+                .all()
+            )
+            if draft_candidates:
+                sync_draft_logs(db, gmail, draft_candidates)
+
+            # 2) Remove any log whose Gmail thread was deleted (Inbox + Trash)
+            all_with_thread = (
+                db.query(MessageLog)
+                .filter(
+                    MessageLog.tenant_id == tenant.id,
+                    MessageLog.gmail_thread_id.isnot(None),
+                )
+                .order_by(MessageLog.created_at.desc())
+                .limit(min(limit, 500))
+                .all()
+            )
+            removed = purge_logs_for_missing_threads(db, gmail, all_with_thread)
+            if removed:
+                logger.info("Purged %s logs with deleted Gmail threads for %s", removed, tenant_slug)
+        except RuntimeError as exc:
+            logger.warning("Gmail log sync skipped for %s: %s", tenant_slug, exc)
+
+    # Drop leftover soft-deleted rows from older versions
     db.query(MessageLog).filter(
         MessageLog.tenant_id == tenant.id,
         MessageLog.direction == "discarded",

@@ -1,4 +1,4 @@
-"""Sync MessageLog draft rows with live Gmail draft/sent state."""
+"""Sync MessageLog rows with live Gmail draft/thread state."""
 
 import logging
 from typing import Optional
@@ -28,6 +28,22 @@ def list_live_draft_ids(gmail) -> set[str]:
     return ids
 
 
+def thread_exists(gmail, thread_id: str, cache: dict[str, bool]) -> bool:
+    if thread_id in cache:
+        return cache[thread_id]
+    try:
+        gmail.users().threads().get(
+            userId="me",
+            id=thread_id,
+            format="metadata",
+            metadataHeaders=["Subject"],
+        ).execute()
+        cache[thread_id] = True
+    except Exception:
+        cache[thread_id] = False
+    return cache[thread_id]
+
+
 def thread_has_sent_reply(gmail, thread_id: Optional[str]) -> Optional[str]:
     """Return Gmail message id if the thread has an outbound SENT message."""
     if not thread_id:
@@ -49,6 +65,32 @@ def thread_has_sent_reply(gmail, thread_id: Optional[str]) -> Optional[str]:
     return None
 
 
+def purge_logs_for_missing_threads(db: Session, gmail, logs: list[MessageLog]) -> int:
+    """
+    Delete message-log rows whose Gmail thread no longer exists
+    (deleted from Inbox and Trash).
+    """
+    cache: dict[str, bool] = {}
+    deleted = 0
+    for log in list(logs):
+        thread_id = log.gmail_thread_id
+        if not thread_id:
+            continue
+        if thread_exists(gmail, thread_id, cache):
+            continue
+        logger.info(
+            "Removing log %s (%s) — Gmail thread %s gone (deleted from mailbox)",
+            log.id,
+            log.subject,
+            thread_id,
+        )
+        db.delete(log)
+        deleted += 1
+    if deleted:
+        db.commit()
+    return deleted
+
+
 def sync_draft_logs(db: Session, gmail, logs: list[MessageLog]) -> dict[str, int]:
     """
     Align draft MessageLogs with Gmail:
@@ -66,7 +108,6 @@ def sync_draft_logs(db: Session, gmail, logs: list[MessageLog]) -> dict[str, int
     counts["live_gmail_drafts"] = len(live_ids)
     logger.info("Gmail has %s live draft(s); checking %s dashboard draft row(s)", len(live_ids), len(logs))
 
-    # Newest first so we keep the latest row per draft/thread
     ordered = sorted(logs, key=lambda r: r.created_at or r.id, reverse=True)
     seen_draft_ids: set[str] = set()
     seen_threads: set[str] = set()
@@ -78,7 +119,6 @@ def sync_draft_logs(db: Session, gmail, logs: list[MessageLog]) -> dict[str, int
         draft_id = log.gmail_draft_id
         thread_id = log.gmail_thread_id
 
-        # Duplicate row for same draft or thread → remove
         if draft_id and draft_id in seen_draft_ids:
             logger.info("Removing duplicate draft log %s (draft %s)", log.id, draft_id)
             db.delete(log)
@@ -103,7 +143,6 @@ def sync_draft_logs(db: Session, gmail, logs: list[MessageLog]) -> dict[str, int
             counts["kept"] += 1
             continue
 
-        # Draft not in Gmail Drafts folder anymore
         sent_id = thread_has_sent_reply(gmail, thread_id)
         if sent_id:
             log.direction = "outbound"
