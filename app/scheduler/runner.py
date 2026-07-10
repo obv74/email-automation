@@ -28,6 +28,9 @@ def start_scheduler() -> None:
         minutes=1,
         id="gmail_poll",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=120,
     )
     _scheduler.add_job(
         run_reminder_check_all,
@@ -35,6 +38,8 @@ def start_scheduler() -> None:
         minutes=settings.reminder_check_interval_minutes,
         id="reminder_check",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
     _scheduler.add_job(
         run_followup_check_all,
@@ -42,6 +47,8 @@ def start_scheduler() -> None:
         minutes=settings.followup_check_interval_minutes,
         id="followup_check",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
     _scheduler.start()
     logger.info("Scheduler started (all active companies)")

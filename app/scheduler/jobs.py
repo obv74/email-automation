@@ -44,26 +44,47 @@ def _send_email(db: Session, tenant_id: str, to: str, subject: str, body: str, d
 
 
 def sync_jobs_from_sheet(db: Session, tenant_id: str) -> int:
-    """Import booked jobs from a 'Jobs' tab on the pricing sheet."""
+    """Import booked jobs from a 'Jobs' tab on the pricing sheet.
+
+    The Jobs tab is optional — missing tab / bad range must not crash the scheduler.
+    """
     tenant = get_tenant(db, tenant_id)
     sheet_id = tenant_pricing_sheet_id(tenant) if tenant else get_settings().pricing_sheet_id
     if not sheet_id:
         return 0
 
     from googleapiclient.discovery import build
+    from googleapiclient.errors import HttpError
     from app.auth.google_oauth import load_credentials
 
     creds = load_credentials(db, tenant_id)
     if not creds:
         return 0
 
-    service = build("sheets", "v4", credentials=creds, cache_discovery=False)
-    result = (
-        service.spreadsheets()
-        .values()
-        .get(spreadsheetId=sheet_id, range="Jobs!A:F")
-        .execute()
-    )
+    try:
+        service = build("sheets", "v4", credentials=creds, cache_discovery=False)
+        result = (
+            service.spreadsheets()
+            .values()
+            .get(spreadsheetId=sheet_id, range="Jobs!A:F")
+            .execute()
+        )
+    except HttpError as exc:
+        status = getattr(exc.resp, "status", None)
+        # 400 Unable to parse range = tab "Jobs" does not exist (optional)
+        logger.info(
+            "Jobs tab not available for tenant %s (sheet %s): %s",
+            tenant_id,
+            sheet_id,
+            exc,
+        )
+        if status not in (400, 403, 404):
+            logger.warning("Unexpected Sheets error syncing Jobs for %s: %s", tenant_id, exc)
+        return 0
+    except Exception as exc:
+        logger.warning("Could not sync Jobs sheet for %s: %s", tenant_id, exc)
+        return 0
+
     values = result.get("values", [])
     if len(values) < 2:
         return 0
@@ -259,7 +280,10 @@ def run_reminder_check_all(_unused: str = "") -> None:
         from app.tenants.service import list_pollable_tenants
 
         for tenant in list_pollable_tenants(db):
-            run_reminder_check(tenant.id)
+            try:
+                run_reminder_check(tenant.id)
+            except Exception as exc:
+                logger.exception("Reminder check failed for %s: %s", tenant.slug, exc)
     finally:
         db.close()
 
@@ -270,6 +294,9 @@ def run_followup_check_all(_unused: str = "") -> None:
         from app.tenants.service import list_pollable_tenants
 
         for tenant in list_pollable_tenants(db):
-            run_followup_check(tenant.id)
+            try:
+                run_followup_check(tenant.id)
+            except Exception as exc:
+                logger.exception("Follow-up check failed for %s: %s", tenant.slug, exc)
     finally:
         db.close()
