@@ -240,9 +240,11 @@ def run_gmail_poll_sync(_unused: str = "") -> None:
 async def run_gmail_poll_all() -> None:
     db = SessionLocal()
     try:
-        from app.tenants.service import list_pollable_tenants
+        from app.tenants.service import list_pollable_tenants, tenant_due_for_poll
 
         for tenant in list_pollable_tenants(db):
+            if not tenant_due_for_poll(tenant):
+                continue
             try:
                 await poll_unread_threads(db, tenant.id)
             except Exception as exc:

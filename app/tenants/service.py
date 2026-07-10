@@ -1,6 +1,7 @@
 """Multi-tenant helpers — each company is an isolated row in shared tables."""
 
 import re
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -12,6 +13,12 @@ def slugify(name: str) -> str:
     s = name.lower().strip()
     s = re.sub(r"[^a-z0-9]+", "-", s)
     return s.strip("-")[:48] or "company"
+
+
+def pricing_sheet_url(sheet_id: Optional[str]) -> Optional[str]:
+    if not sheet_id:
+        return None
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
 
 
 def get_tenant(db: Session, tenant_id: str) -> Optional[Tenant]:
@@ -47,16 +54,58 @@ def list_tenants_for_user(db: Session, user_id: int, active_only: bool = True) -
 
 
 def tenant_to_dict(tenant: Tenant) -> dict:
+    from app.config import get_settings
+
+    settings = get_settings()
+    sheet_id = tenant.pricing_sheet_id or settings.pricing_sheet_id or None
     return {
         "id": tenant.id,
         "slug": tenant.slug,
         "name": tenant.name,
         "gmail_connected": tenant.gmail_connected,
         "connected_gmail_email": tenant.connected_gmail_email,
-        "pricing_sheet_id": tenant.pricing_sheet_id,
+        "pricing_sheet_id": sheet_id,
+        "pricing_sheet_url": pricing_sheet_url(sheet_id),
         "is_active": tenant.is_active,
-        "reply_mode": tenant.reply_mode,
+        "reply_mode": tenant.reply_mode or settings.reply_mode,
+        "poll_interval_minutes": tenant.poll_interval_minutes or settings.poll_gmail_interval_minutes,
     }
+
+
+def get_or_create_user_company(
+    db: Session,
+    user_id: int,
+    user_name: str,
+    user_email: str,
+) -> Tenant:
+    tenants = list_tenants_for_user(db, user_id)
+    if tenants:
+        return tenants[0]
+    return create_tenant(
+        db,
+        name=user_name or "My Moving Company",
+        slug=slugify(f"company-{user_id}"),
+        contact_email=user_email,
+        owner_user_id=user_id,
+    )
+
+
+def tenant_poll_interval_minutes(tenant: Tenant) -> int:
+    from app.config import get_settings
+
+    return tenant.poll_interval_minutes or get_settings().poll_gmail_interval_minutes
+
+
+def tenant_due_for_poll(tenant: Tenant) -> bool:
+    if not tenant.last_polled_at:
+        return True
+    interval = tenant_poll_interval_minutes(tenant)
+    return datetime.utcnow() - tenant.last_polled_at >= timedelta(minutes=interval)
+
+
+def mark_tenant_polled(db: Session, tenant: Tenant) -> None:
+    tenant.last_polled_at = datetime.utcnow()
+    db.commit()
 
 
 def list_pollable_tenants(db: Session) -> list[Tenant]:
@@ -94,6 +143,32 @@ def create_tenant(
         owner_user_id=owner_user_id,
     )
     db.add(tenant)
+    db.commit()
+    db.refresh(tenant)
+    return tenant
+
+
+def update_tenant_settings(
+    db: Session,
+    tenant: Tenant,
+    *,
+    name: Optional[str] = None,
+    pricing_sheet_id: Optional[str] = None,
+    reply_mode: Optional[str] = None,
+    poll_interval_minutes: Optional[int] = None,
+) -> Tenant:
+    if name is not None:
+        tenant.name = name.strip()
+    if pricing_sheet_id is not None:
+        tenant.pricing_sheet_id = pricing_sheet_id.strip() or None
+    if reply_mode is not None:
+        if reply_mode not in ("draft", "send"):
+            raise ValueError("reply_mode must be draft or send")
+        tenant.reply_mode = reply_mode
+    if poll_interval_minutes is not None:
+        if poll_interval_minutes < 1 or poll_interval_minutes > 1440:
+            raise ValueError("poll_interval_minutes must be between 1 and 1440")
+        tenant.poll_interval_minutes = poll_interval_minutes
     db.commit()
     db.refresh(tenant)
     return tenant

@@ -25,7 +25,7 @@ def start_scheduler() -> None:
     _scheduler.add_job(
         run_gmail_poll_sync,
         "interval",
-        minutes=settings.poll_gmail_interval_minutes,
+        minutes=1,
         id="gmail_poll",
         replace_existing=True,
     )

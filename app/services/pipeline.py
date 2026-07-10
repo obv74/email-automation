@@ -86,6 +86,7 @@ def _mark_ignored(
     message_id: str,
     subject: str,
     reason: str,
+    inbound_body: str = "",
 ) -> None:
     existing = (
         db.query(ProcessedThread)
@@ -114,6 +115,7 @@ def _mark_ignored(
             gmail_thread_id=thread_id,
             direction="ignored",
             subject=subject,
+            inbound_body=inbound_body[:8000] if inbound_body else None,
             reply_body=reason,
         )
     )
@@ -141,7 +143,9 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
 
     is_job, classify_reason = await is_moving_inquiry(conversation)
     if not is_job and not force:
-        _mark_ignored(db, tenant_id, thread_id, latest.message_id, latest.subject, classify_reason)
+        _mark_ignored(
+            db, tenant_id, thread_id, latest.message_id, latest.subject, classify_reason, latest.body
+        )
         try:
             mark_thread_as_read(gmail, thread_id)
         except Exception as exc:
@@ -187,6 +191,7 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
             gmail_draft_id=draft_id,
             direction=direction,
             subject=subject,
+            inbound_body=latest.body[:8000] if latest.body else None,
             extraction_json=json.dumps(job.model_dump()),
             quote_amount=quote,
             reply_body=reply_body,
@@ -229,6 +234,8 @@ async def poll_all_tenants(db: Session) -> dict[str, list[dict]]:
 
 
 async def poll_unread_threads(db: Session, tenant_id: str) -> list[dict]:
+    from app.tenants.service import get_tenant, mark_tenant_polled
+
     gmail = get_gmail_service(db, tenant_id)
     thread_ids = list_recent_thread_ids(gmail, query="is:unread in:inbox", max_results=10)
     results = []
@@ -239,4 +246,7 @@ async def poll_unread_threads(db: Session, tenant_id: str) -> list[dict]:
         except Exception as exc:
             logger.exception("Failed processing thread %s: %s", tid, exc)
             results.append({"status": "error", "thread_id": tid, "error": str(exc)})
+    tenant = get_tenant(db, tenant_id)
+    if tenant:
+        mark_tenant_polled(db, tenant)
     return results

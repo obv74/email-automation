@@ -1,18 +1,26 @@
 """Protected tenant and message APIs."""
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.schemas import CreateTenantBody, MessageLogOut, TenantOut
+from app.api.schemas import CreateTenantBody, MessageLogOut, TenantOut, UpdateTenantBody
 from app.auth.deps import get_current_user, require_tenant_access
 from app.auth.google_oauth import disconnect_gmail
 from app.db.models import MessageLog, ProcessedThread, User, get_db
 from app.gmail.client import get_gmail_service
+from app.gmail.drafts import get_draft, send_draft, send_message
 from app.gmail.threads import fetch_full_thread, list_recent_thread_ids
 from app.services.pipeline import poll_unread_threads, process_thread
-from app.tenants.service import create_tenant, list_tenants_for_user, tenant_to_dict
+from app.tenants.service import (
+    create_tenant,
+    get_or_create_user_company,
+    list_tenants_for_user,
+    tenant_to_dict,
+    update_tenant_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +28,65 @@ router = APIRouter(prefix="/api", tags=["api"])
 
 
 def _tenant_out(tenant) -> TenantOut:
-    d = tenant_to_dict(tenant)
-    return TenantOut(**d)
+    return TenantOut(**tenant_to_dict(tenant))
+
+
+def _parse_summary(extraction_json: Optional[str]) -> Optional[str]:
+    if not extraction_json:
+        return None
+    try:
+        data = json.loads(extraction_json)
+        return data.get("summary")
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _log_out(log: MessageLog, draft_exists: Optional[bool] = None) -> MessageLogOut:
+    can_send = log.direction in ("draft",) and bool(log.reply_body or log.gmail_draft_id)
+    return MessageLogOut(
+        id=log.id,
+        direction=log.direction,
+        subject=log.subject,
+        quote_amount=log.quote_amount,
+        rule_name=log.rule_name,
+        reply_body=log.reply_body,
+        inbound_body=log.inbound_body,
+        summary=_parse_summary(log.extraction_json),
+        extraction_json=log.extraction_json,
+        gmail_thread_id=log.gmail_thread_id,
+        gmail_draft_id=log.gmail_draft_id,
+        gmail_message_id=log.gmail_message_id,
+        draft_exists=draft_exists,
+        can_send=can_send and log.direction != "outbound",
+        created_at=log.created_at,
+    )
+
+
+@router.get("/company", response_model=TenantOut)
+def api_get_my_company(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    tenant = get_or_create_user_company(db, user.id, user.name or "", user.email)
+    return _tenant_out(tenant)
+
+
+@router.patch("/company", response_model=TenantOut)
+def api_update_my_company(
+    body: UpdateTenantBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    tenant = get_or_create_user_company(db, user.id, user.name or "", user.email)
+    try:
+        tenant = update_tenant_settings(
+            db,
+            tenant,
+            name=body.name,
+            pricing_sheet_id=body.pricing_sheet_id,
+            reply_mode=body.reply_mode,
+            poll_interval_minutes=body.poll_interval_minutes,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return _tenant_out(tenant)
 
 
 @router.get("/tenants", response_model=list[TenantOut])
@@ -59,6 +124,28 @@ def api_get_tenant(
     return _tenant_out(tenant)
 
 
+@router.patch("/tenants/{tenant_slug}", response_model=TenantOut)
+def api_update_tenant(
+    tenant_slug: str,
+    body: UpdateTenantBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    tenant = require_tenant_access(db, user, tenant_slug)
+    try:
+        tenant = update_tenant_settings(
+            db,
+            tenant,
+            name=body.name,
+            pricing_sheet_id=body.pricing_sheet_id,
+            reply_mode=body.reply_mode,
+            poll_interval_minutes=body.poll_interval_minutes,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return _tenant_out(tenant)
+
+
 @router.get("/tenants/{tenant_slug}/logs", response_model=list[MessageLogOut])
 def api_tenant_logs(
     tenant_slug: str,
@@ -74,19 +161,77 @@ def api_tenant_logs(
         .limit(min(limit, 500))
         .all()
     )
-    return [
-        MessageLogOut(
-            id=log.id,
-            direction=log.direction,
-            subject=log.subject,
-            quote_amount=log.quote_amount,
-            rule_name=log.rule_name,
-            reply_body=log.reply_body,
-            gmail_thread_id=log.gmail_thread_id,
-            created_at=log.created_at,
-        )
-        for log in logs
-    ]
+
+    draft_exists_map: dict[int, Optional[bool]] = {}
+    if tenant.gmail_connected and any(log.gmail_draft_id for log in logs):
+        try:
+            gmail = get_gmail_service(db, tenant.id)
+            for log in logs:
+                if log.gmail_draft_id:
+                    draft_exists_map[log.id] = get_draft(gmail, log.gmail_draft_id) is not None
+        except RuntimeError:
+            pass
+
+    return [_log_out(log, draft_exists_map.get(log.id)) for log in logs]
+
+
+@router.post("/tenants/{tenant_slug}/logs/{log_id}/send")
+def api_send_log_reply(
+    tenant_slug: str,
+    log_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    tenant = require_tenant_access(db, user, tenant_slug)
+    log = (
+        db.query(MessageLog)
+        .filter(MessageLog.tenant_id == tenant.id, MessageLog.id == log_id)
+        .first()
+    )
+    if not log:
+        raise HTTPException(404, "Message not found")
+    if log.direction == "outbound":
+        raise HTTPException(400, "Already sent")
+
+    gmail = get_gmail_service(db, tenant.id)
+    message_id = None
+    try:
+        if log.gmail_draft_id:
+            sent = send_draft(gmail, log.gmail_draft_id)
+            message_id = sent.get("id")
+        elif log.reply_body:
+            sent = send_message(
+                gmail,
+                _reply_to_from_log(log),
+                log.subject or "Re: your move",
+                log.reply_body,
+                log.gmail_thread_id,
+            )
+            message_id = sent.get("id")
+        else:
+            raise HTTPException(400, "Nothing to send")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Send failed for log %s", log_id)
+        raise HTTPException(500, f"Send failed: {exc}") from exc
+
+    log.direction = "outbound"
+    log.gmail_message_id = message_id
+    log.gmail_draft_id = None
+    db.commit()
+    return {"status": "ok", "message_id": message_id}
+
+
+def _reply_to_from_log(log: MessageLog) -> str:
+    if log.extraction_json:
+        try:
+            data = json.loads(log.extraction_json)
+            if data.get("customer_email"):
+                return data["customer_email"]
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return "customer@example.com"
 
 
 @router.post("/tenants/{tenant_slug}/gmail/disconnect")
