@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, LogOut, Mail, Settings } from "lucide-react";
+import { LayoutDashboard, LogOut, Mail, Settings, Sparkles } from "lucide-react";
 import clsx from "clsx";
 import { User } from "@/lib/api";
 import { getStoredUser, logout } from "@/lib/auth";
 
 const nav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/prompts", label: "AI prompts", icon: Sparkles },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
