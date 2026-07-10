@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, ExternalLink, Send } from "lucide-react";
 import clsx from "clsx";
 import { MessageLog } from "@/lib/api";
@@ -25,6 +25,16 @@ function draftStatus(log: MessageLog) {
   return { label: log.direction, className: "text-slate-500" };
 }
 
+function formatTime(iso: string) {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+  } catch {
+    return iso;
+  }
+}
+
 type Props = {
   logs: MessageLog[];
   onSend: (logId: number) => Promise<void>;
@@ -33,6 +43,11 @@ type Props = {
 
 export function MessageLogPanel({ logs, onSend, sendingId }: Props) {
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   if (logs.length === 0) {
     return (
@@ -70,7 +85,9 @@ export function MessageLogPanel({ logs, onSend, sendingId }: Props) {
                   )}
                 </div>
                 <p className="mt-1 truncate font-medium text-slate-900">{log.subject || "No subject"}</p>
-                <p className="mt-0.5 text-xs text-slate-500">{new Date(log.created_at).toLocaleString()}</p>
+                <p className="mt-0.5 text-xs text-slate-500" suppressHydrationWarning>
+                  {mounted ? formatTime(log.created_at) : "—"}
+                </p>
               </div>
               {open ? (
                 <ChevronUp className="mt-1 h-5 w-5 flex-shrink-0 text-slate-400" />

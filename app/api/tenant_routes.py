@@ -12,8 +12,9 @@ from app.auth.deps import get_current_user, require_tenant_access
 from app.auth.google_oauth import disconnect_gmail
 from app.db.models import MessageLog, ProcessedThread, User, get_db
 from app.gmail.client import get_gmail_service
-from app.gmail.drafts import get_draft, send_draft, send_message
+from app.gmail.drafts import send_draft, send_message
 from app.gmail.threads import fetch_full_thread, list_recent_thread_ids
+from app.services.draft_sync import sync_draft_logs
 from app.services.pipeline import poll_unread_threads, process_thread
 from app.tenants.service import (
     create_tenant,
@@ -43,7 +44,9 @@ def _parse_summary(extraction_json: Optional[str]) -> Optional[str]:
 
 
 def _log_out(log: MessageLog, draft_exists: Optional[bool] = None) -> MessageLogOut:
-    can_send = log.direction in ("draft",) and bool(log.reply_body or log.gmail_draft_id)
+    can_send = log.direction == "draft" and bool(log.reply_body or log.gmail_draft_id)
+    if draft_exists is False:
+        can_send = False
     return MessageLogOut(
         id=log.id,
         direction=log.direction,
@@ -58,7 +61,7 @@ def _log_out(log: MessageLog, draft_exists: Optional[bool] = None) -> MessageLog
         gmail_draft_id=log.gmail_draft_id,
         gmail_message_id=log.gmail_message_id,
         draft_exists=draft_exists,
-        can_send=can_send and log.direction != "outbound",
+        can_send=can_send,
         created_at=log.created_at,
     )
 
@@ -163,17 +166,19 @@ def api_tenant_logs(
         .all()
     )
 
-    draft_exists_map: dict[int, Optional[bool]] = {}
-    if tenant.gmail_connected and any(log.gmail_draft_id for log in logs):
+    # Sync draft rows with live Gmail (deleted → hide, sent in Gmail → Sent)
+    if tenant.gmail_connected and any(log.direction == "draft" and log.gmail_draft_id for log in logs):
         try:
             gmail = get_gmail_service(db, tenant.id)
-            for log in logs:
-                if log.gmail_draft_id:
-                    draft_exists_map[log.id] = get_draft(gmail, log.gmail_draft_id) is not None
-        except RuntimeError:
-            pass
+            sync_draft_logs(db, gmail, logs)
+        except RuntimeError as exc:
+            logger.warning("Draft sync skipped for %s: %s", tenant_slug, exc)
 
-    return [_log_out(log, draft_exists_map.get(log.id)) for log in logs]
+    visible = [log for log in logs if log.direction != "discarded"]
+    return [
+        _log_out(log, True if log.direction == "draft" and log.gmail_draft_id else None)
+        for log in visible
+    ]
 
 
 @router.post("/tenants/{tenant_slug}/logs/{log_id}/send")

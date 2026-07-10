@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard, LogOut, Mail, Settings } from "lucide-react";
 import clsx from "clsx";
+import { User } from "@/lib/api";
 import { getStoredUser, logout } from "@/lib/auth";
 
 const nav = [
@@ -13,7 +15,11 @@ const nav = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const user = getStoredUser();
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    setUser(getStoredUser());
+  }, []);
 
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -47,8 +53,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
         <div className="border-t border-white/10 p-4">
-          <p className="truncate text-sm font-medium">{user?.name || user?.email}</p>
-          <p className="truncate text-xs text-indigo-200">{user?.email}</p>
+          <p className="truncate text-sm font-medium" suppressHydrationWarning>
+            {user?.name || user?.email || "…"}
+          </p>
+          <p className="truncate text-xs text-indigo-200" suppressHydrationWarning>
+            {user?.email || ""}
+          </p>
           <button
             onClick={logout}
             className="mt-3 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-indigo-100 hover:bg-white/10"
