@@ -49,7 +49,9 @@ export function MessageLogPanel({ logs, onSend, sendingId }: Props) {
     setMounted(true);
   }, []);
 
-  if (logs.length === 0) {
+  const visibleLogs = logs.filter((log) => log.direction !== "discarded");
+
+  if (visibleLogs.length === 0) {
     return (
       <div className="card py-12 text-center text-sm text-slate-500">
         No messages yet. Connect Gmail and wait for inquiries, or click Poll now.
@@ -59,7 +61,7 @@ export function MessageLogPanel({ logs, onSend, sendingId }: Props) {
 
   return (
     <div className="space-y-3">
-      {logs.map((log) => {
+      {visibleLogs.map((log) => {
         const open = expanded === log.id;
         const status = draftStatus(log);
         return (

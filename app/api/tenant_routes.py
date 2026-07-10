@@ -158,26 +158,38 @@ def api_tenant_logs(
     limit: int = 100,
 ):
     tenant = require_tenant_access(db, user, tenant_slug)
+
+    # Sync draft rows with live Gmail before returning the list
+    draft_candidates = (
+        db.query(MessageLog)
+        .filter(
+            MessageLog.tenant_id == tenant.id,
+            MessageLog.direction == "draft",
+            MessageLog.gmail_draft_id.isnot(None),
+        )
+        .all()
+    )
+    if tenant.gmail_connected and draft_candidates:
+        try:
+            gmail = get_gmail_service(db, tenant.id)
+            sync_draft_logs(db, gmail, draft_candidates)
+        except RuntimeError as exc:
+            logger.warning("Draft sync skipped for %s: %s", tenant_slug, exc)
+
+    # Re-query so discarded rows are never returned
     logs = (
         db.query(MessageLog)
-        .filter(MessageLog.tenant_id == tenant.id)
+        .filter(
+            MessageLog.tenant_id == tenant.id,
+            MessageLog.direction != "discarded",
+        )
         .order_by(MessageLog.created_at.desc())
         .limit(min(limit, 500))
         .all()
     )
-
-    # Sync draft rows with live Gmail (deleted → hide, sent in Gmail → Sent)
-    if tenant.gmail_connected and any(log.direction == "draft" and log.gmail_draft_id for log in logs):
-        try:
-            gmail = get_gmail_service(db, tenant.id)
-            sync_draft_logs(db, gmail, logs)
-        except RuntimeError as exc:
-            logger.warning("Draft sync skipped for %s: %s", tenant_slug, exc)
-
-    visible = [log for log in logs if log.direction != "discarded"]
     return [
         _log_out(log, True if log.direction == "draft" and log.gmail_draft_id else None)
-        for log in visible
+        for log in logs
     ]
 
 

@@ -23,7 +23,8 @@ def thread_has_sent_reply(gmail, thread_id: Optional[str], reply_body: Optional[
             .execute()
         )
     except Exception as exc:
-        logger.warning("Could not load thread %s for draft sync: %s", thread_id, exc)
+        # Thread deleted/trashed in Gmail — treat as not sent
+        logger.info("Thread %s not found during draft sync (%s)", thread_id, type(exc).__name__)
         return None
 
     for msg in thread.get("messages") or []:
@@ -70,8 +71,7 @@ def sync_draft_logs(db: Session, gmail, logs: list[MessageLog]) -> list[MessageL
         after = (log.direction, log.gmail_draft_id, log.gmail_message_id)
         if before != after:
             changed = True
+            db.add(log)
     if changed:
         db.commit()
-        for log in logs:
-            db.refresh(log)
     return logs
