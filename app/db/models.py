@@ -38,6 +38,10 @@ class Tenant(Base):
     rules_file: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     reply_mode: Mapped[str] = mapped_column(String(16), default="draft")
     ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    classify_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    extraction_system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    extraction_user_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reply_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     poll_interval_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_polled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -190,6 +194,10 @@ def _migrate_sqlite(engine) -> None:
         "rules_file": "VARCHAR(255)",
         "reply_mode": "VARCHAR(16) DEFAULT 'draft'",
         "ai_enabled": "BOOLEAN DEFAULT 1",
+        "classify_prompt": "TEXT",
+        "extraction_system_prompt": "TEXT",
+        "extraction_user_prompt": "TEXT",
+        "reply_template": "TEXT",
         "poll_interval_minutes": "INTEGER",
         "last_polled_at": "DATETIME",
         "is_active": "BOOLEAN DEFAULT 1",

@@ -196,7 +196,10 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
             logger.warning("Could not mark thread read %s: %s", thread_id, exc)
         return {"status": "monitored", "thread_id": thread_id}
 
-    is_job, classify_reason = await is_moving_inquiry(conversation)
+    is_job, classify_reason = await is_moving_inquiry(
+        conversation,
+        prompt_template=tenant_row.classify_prompt if tenant_row else None,
+    )
     if not is_job and not force:
         _mark_ignored(
             db, tenant_id, thread_id, latest.message_id, latest.subject, classify_reason, latest.body
@@ -214,11 +217,18 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
     claim = _claim_thread(db, tenant_id, thread_id, latest.message_id)
 
     try:
-        job = await extract_job_from_thread(conversation)
+        job = await extract_job_from_thread(
+            conversation,
+            system_prompt=tenant_row.extraction_system_prompt if tenant_row else None,
+            user_prompt_template=tenant_row.extraction_user_prompt if tenant_row else None,
+        )
         pricing_rows = fetch_pricing_rows(db, tenant_id)
         quote = compute_quote(job, pricing_rows)
         rule_name, reply_body = generate_reply(
-            job, quote, rules_file=tenant_row.rules_file if tenant_row else None
+            job,
+            quote,
+            rules_file=tenant_row.rules_file if tenant_row else None,
+            reply_template=tenant_row.reply_template if tenant_row else None,
         )
 
         subject = latest.subject if latest.subject.lower().startswith("re:") else f"Re: {latest.subject}"

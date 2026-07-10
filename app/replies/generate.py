@@ -3,6 +3,7 @@
 from typing import Any, Optional
 
 from app.extraction.schema import ExtractedJob
+from app.prompts.defaults import REPLY_TEMPLATE
 from app.replies.rules import load_rules, pick_template_name
 
 
@@ -29,7 +30,7 @@ def render_template(template: str, job: ExtractedJob, quote: Optional[str]) -> s
         "{inventory}": inventory,
         "{customer_requests}": requests,
         "{quote}": quote_text,
-        "{summary}": job.summary,
+        "{summary}": job.summary or "",
     }
     body = template
     for key, value in replacements.items():
@@ -37,18 +38,20 @@ def render_template(template: str, job: ExtractedJob, quote: Optional[str]) -> s
     return body
 
 
-def generate_reply(job: ExtractedJob, quote: Optional[str], rules_file: Optional[str] = None) -> tuple[str, str]:
+def generate_reply(
+    job: ExtractedJob,
+    quote: Optional[str],
+    rules_file: Optional[str] = None,
+    reply_template: Optional[str] = None,
+) -> tuple[str, str]:
+    custom = (reply_template or "").strip()
+    if custom:
+        return "custom", render_template(custom, job, quote)
+
     rules = load_rules(rules_file)
     template_name = pick_template_name(job.summary or "", rules)
     templates: dict[str, Any] = rules.get("templates", {})
     template_body = templates.get(template_name, templates.get("default", ""))
     if not template_body:
-        template_body = (
-            "Hi {customer_name},\n\n"
-            "Thank you for reaching out. Based on your request:\n\n"
-            "{summary}\n\n"
-            "Estimated quote: {quote}\n\n"
-            "Please let us know if you'd like to proceed.\n\n"
-            "Best regards"
-        )
+        template_body = REPLY_TEMPLATE
     return template_name, render_template(template_body, job, quote)

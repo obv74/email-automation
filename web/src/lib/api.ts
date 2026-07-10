@@ -7,6 +7,19 @@ export type User = {
   created_at: string;
 };
 
+export type PromptPlaceholders = {
+  classify: string;
+  extraction: string;
+  reply: string;
+};
+
+export type UsingDefaultPrompts = {
+  classify: boolean;
+  extraction_system: boolean;
+  extraction_user: boolean;
+  reply: boolean;
+};
+
 export type Tenant = {
   id: string;
   slug: string;
@@ -19,6 +32,12 @@ export type Tenant = {
   reply_mode: string;
   ai_enabled: boolean;
   poll_interval_minutes: number;
+  classify_prompt: string;
+  extraction_system_prompt: string;
+  extraction_user_prompt: string;
+  reply_template: string;
+  prompt_placeholders: PromptPlaceholders;
+  using_default_prompts: UsingDefaultPrompts;
 };
 
 export type MessageLog = {
@@ -45,6 +64,11 @@ export type UpdateCompanyBody = {
   reply_mode?: string;
   poll_interval_minutes?: number;
   ai_enabled?: boolean;
+  classify_prompt?: string;
+  extraction_system_prompt?: string;
+  extraction_user_prompt?: string;
+  reply_template?: string;
+  reset_prompts?: boolean;
 };
 
 export class ApiError extends Error {

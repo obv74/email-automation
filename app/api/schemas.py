@@ -43,6 +43,24 @@ class UpdateTenantBody(BaseModel):
     reply_mode: Optional[str] = None
     poll_interval_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
     ai_enabled: Optional[bool] = None
+    classify_prompt: Optional[str] = Field(default=None, max_length=20000)
+    extraction_system_prompt: Optional[str] = Field(default=None, max_length=20000)
+    extraction_user_prompt: Optional[str] = Field(default=None, max_length=20000)
+    reply_template: Optional[str] = Field(default=None, max_length=50000)
+    reset_prompts: Optional[bool] = None
+
+
+class PromptPlaceholders(BaseModel):
+    classify: str
+    extraction: str
+    reply: str
+
+
+class UsingDefaultPrompts(BaseModel):
+    classify: bool
+    extraction_system: bool
+    extraction_user: bool
+    reply: bool
 
 
 class TenantOut(BaseModel):
@@ -57,6 +75,12 @@ class TenantOut(BaseModel):
     reply_mode: str
     ai_enabled: bool
     poll_interval_minutes: int
+    classify_prompt: str
+    extraction_system_prompt: str
+    extraction_user_prompt: str
+    reply_template: str
+    prompt_placeholders: PromptPlaceholders
+    using_default_prompts: UsingDefaultPrompts
 
 
 class MessageLogOut(BaseModel):

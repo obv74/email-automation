@@ -1,11 +1,8 @@
 """Prompt templates for LLM extraction."""
 
-EXTRACTION_SYSTEM = """You extract structured moving-job information from customer email threads.
-Return ONLY valid JSON matching the schema exactly. Every field must be present.
-Use null for unknown scalar fields and [] for empty lists.
-Do not invent prices. Only extract what is explicitly stated or clearly implied.
-Distinguish customer_requests (what the customer wants) from promises_made (what the moving company promised).
-For truck_type use values like "16ft", "26ft", "small", "large", or null if not mentioned."""
+from typing import Optional
+
+from app.prompts.defaults import EXTRACTION_SYSTEM, EXTRACTION_USER
 
 EXTRACTION_SCHEMA_HINT = """{
   "customer_name": string or null,
@@ -25,15 +22,16 @@ EXTRACTION_SCHEMA_HINT = """{
 }"""
 
 
-def build_extraction_prompt(conversation: str) -> str:
-    return f"""Extract moving job fields as JSON only. All keys required. Use null/[] if missing.
-
-{EXTRACTION_SCHEMA_HINT}
-
-Email:
----
-{conversation}
----"""
+def build_extraction_prompt(conversation: str, user_template: Optional[str] = None) -> str:
+    template = (user_template or EXTRACTION_USER).strip() or EXTRACTION_USER
+    if "{email}" in template:
+        body = template.replace("{schema}", EXTRACTION_SCHEMA_HINT).replace("{email}", conversation)
+    else:
+        # Custom prompt without placeholder — append email so extraction still works
+        body = f"{template}\n\nEmail:\n---\n{conversation}\n---"
+        if "{schema}" in body:
+            body = body.replace("{schema}", EXTRACTION_SCHEMA_HINT)
+    return body
 
 
 def build_retry_prompt(conversation: str, error: str) -> str:
@@ -45,3 +43,12 @@ Email thread:
 ---
 {conversation}
 ---"""
+
+
+# Re-export for callers that imported EXTRACTION_SYSTEM from here
+__all__ = [
+    "EXTRACTION_SCHEMA_HINT",
+    "EXTRACTION_SYSTEM",
+    "build_extraction_prompt",
+    "build_retry_prompt",
+]

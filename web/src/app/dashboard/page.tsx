@@ -163,6 +163,12 @@ function DashboardContent() {
               </Link>
             )}
           </span>
+          <span>
+            AI prompts:{" "}
+            <Link href="/settings" className="font-semibold text-brand-600 hover:text-brand-700">
+              Edit in Settings
+            </Link>
+          </span>
         </div>
       )}
 

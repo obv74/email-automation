@@ -88,6 +88,11 @@ def api_update_my_company(
             reply_mode=body.reply_mode,
             poll_interval_minutes=body.poll_interval_minutes,
             ai_enabled=body.ai_enabled,
+            classify_prompt=body.classify_prompt,
+            extraction_system_prompt=body.extraction_system_prompt,
+            extraction_user_prompt=body.extraction_user_prompt,
+            reply_template=body.reply_template,
+            reset_prompts=body.reset_prompts,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -146,6 +151,11 @@ def api_update_tenant(
             reply_mode=body.reply_mode,
             poll_interval_minutes=body.poll_interval_minutes,
             ai_enabled=body.ai_enabled,
+            classify_prompt=body.classify_prompt,
+            extraction_system_prompt=body.extraction_system_prompt,
+            extraction_user_prompt=body.extraction_user_prompt,
+            reply_template=body.reply_template,
+            reset_prompts=body.reset_prompts,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

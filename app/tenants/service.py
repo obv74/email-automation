@@ -55,9 +55,22 @@ def list_tenants_for_user(db: Session, user_id: int, active_only: bool = True) -
 
 def tenant_to_dict(tenant: Tenant) -> dict:
     from app.config import get_settings
+    from app.prompts.defaults import (
+        CLASSIFY_PLACEHOLDERS,
+        CLASSIFY_PROMPT,
+        EXTRACTION_PLACEHOLDERS,
+        EXTRACTION_SYSTEM,
+        EXTRACTION_USER,
+        REPLY_PLACEHOLDERS,
+        REPLY_TEMPLATE,
+    )
 
     settings = get_settings()
     sheet_id = tenant.pricing_sheet_id or settings.pricing_sheet_id or None
+    classify = (tenant.classify_prompt or "").strip() or CLASSIFY_PROMPT
+    extraction_system = (tenant.extraction_system_prompt or "").strip() or EXTRACTION_SYSTEM
+    extraction_user = (tenant.extraction_user_prompt or "").strip() or EXTRACTION_USER
+    reply = (tenant.reply_template or "").strip() or REPLY_TEMPLATE
     return {
         "id": tenant.id,
         "slug": tenant.slug,
@@ -70,6 +83,21 @@ def tenant_to_dict(tenant: Tenant) -> dict:
         "reply_mode": tenant.reply_mode or settings.reply_mode,
         "ai_enabled": True if tenant.ai_enabled is None else bool(tenant.ai_enabled),
         "poll_interval_minutes": tenant.poll_interval_minutes or settings.poll_gmail_interval_minutes,
+        "classify_prompt": classify,
+        "extraction_system_prompt": extraction_system,
+        "extraction_user_prompt": extraction_user,
+        "reply_template": reply,
+        "prompt_placeholders": {
+            "classify": CLASSIFY_PLACEHOLDERS,
+            "extraction": EXTRACTION_PLACEHOLDERS,
+            "reply": REPLY_PLACEHOLDERS,
+        },
+        "using_default_prompts": {
+            "classify": not bool((tenant.classify_prompt or "").strip()),
+            "extraction_system": not bool((tenant.extraction_system_prompt or "").strip()),
+            "extraction_user": not bool((tenant.extraction_user_prompt or "").strip()),
+            "reply": not bool((tenant.reply_template or "").strip()),
+        },
     }
 
 
@@ -159,6 +187,11 @@ def update_tenant_settings(
     reply_mode: Optional[str] = None,
     poll_interval_minutes: Optional[int] = None,
     ai_enabled: Optional[bool] = None,
+    classify_prompt: Optional[str] = None,
+    extraction_system_prompt: Optional[str] = None,
+    extraction_user_prompt: Optional[str] = None,
+    reply_template: Optional[str] = None,
+    reset_prompts: Optional[bool] = None,
 ) -> Tenant:
     if name is not None:
         tenant.name = name.strip()
@@ -174,6 +207,37 @@ def update_tenant_settings(
         tenant.poll_interval_minutes = poll_interval_minutes
     if ai_enabled is not None:
         tenant.ai_enabled = ai_enabled
+    if reset_prompts:
+        tenant.classify_prompt = None
+        tenant.extraction_system_prompt = None
+        tenant.extraction_user_prompt = None
+        tenant.reply_template = None
+    else:
+        from app.prompts.defaults import (
+            CLASSIFY_PROMPT,
+            EXTRACTION_SYSTEM,
+            EXTRACTION_USER,
+            REPLY_TEMPLATE,
+        )
+
+        def _store_or_default(value: Optional[str], default: str) -> Optional[str]:
+            if value is None:
+                return None  # field not sent — caller shouldn't pass None meaning "clear" for partial updates
+            text = value.strip()
+            if not text or text == default.strip():
+                return None
+            return text
+
+        if classify_prompt is not None:
+            tenant.classify_prompt = _store_or_default(classify_prompt, CLASSIFY_PROMPT)
+        if extraction_system_prompt is not None:
+            tenant.extraction_system_prompt = _store_or_default(
+                extraction_system_prompt, EXTRACTION_SYSTEM
+            )
+        if extraction_user_prompt is not None:
+            tenant.extraction_user_prompt = _store_or_default(extraction_user_prompt, EXTRACTION_USER)
+        if reply_template is not None:
+            tenant.reply_template = _store_or_default(reply_template, REPLY_TEMPLATE)
     db.commit()
     db.refresh(tenant)
     return tenant
