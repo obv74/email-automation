@@ -42,6 +42,7 @@ class UpdateTenantBody(BaseModel):
     pricing_sheet_id: Optional[str] = None
     reply_mode: Optional[str] = None
     poll_interval_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+    ai_enabled: Optional[bool] = None
 
 
 class TenantOut(BaseModel):
@@ -54,6 +55,7 @@ class TenantOut(BaseModel):
     pricing_sheet_url: Optional[str]
     is_active: bool
     reply_mode: str
+    ai_enabled: bool
     poll_interval_minutes: int
 
 

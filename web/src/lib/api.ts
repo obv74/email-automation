@@ -17,6 +17,7 @@ export type Tenant = {
   pricing_sheet_url: string | null;
   is_active: boolean;
   reply_mode: string;
+  ai_enabled: boolean;
   poll_interval_minutes: number;
 };
 
@@ -43,6 +44,7 @@ export type UpdateCompanyBody = {
   pricing_sheet_id?: string;
   reply_mode?: string;
   poll_interval_minutes?: number;
+  ai_enabled?: boolean;
 };
 
 export class ApiError extends Error {

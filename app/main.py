@@ -31,6 +31,15 @@ class OAuthState(TypedDict):
 _oauth_states: dict[str, OAuthState] = {}
 
 
+def _frontend_settings_url(query: str = "") -> str:
+    settings = get_settings()
+    base = settings.frontend_url.rstrip("/")
+    path = "/settings"
+    if query:
+        return f"{base}{path}?{query}"
+    return f"{base}{path}"
+
+
 def _frontend_dashboard_url(query: str = "") -> str:
     settings = get_settings()
     base = settings.frontend_url.rstrip("/")
@@ -162,7 +171,7 @@ def google_callback(request: Request, db: Session = Depends(get_db)):
     tenant = get_tenant(db, tenant_id)
     slug = tenant.slug if tenant else settings.default_tenant_id
     if settings.frontend_url:
-        return RedirectResponse(_frontend_dashboard_url("gmail=connected"))
+        return RedirectResponse(_frontend_settings_url("gmail=connected"))
     return RedirectResponse("/dashboard")
 
 
@@ -173,5 +182,5 @@ def google_disconnect_legacy(tenant: str, token: str, db: Session = Depends(get_
     require_tenant_access(db, user, t.slug)
     disconnect_gmail(db, t.id)
     if get_settings().frontend_url:
-        return RedirectResponse(_frontend_dashboard_url("gmail=disconnected"))
+        return RedirectResponse(_frontend_settings_url("gmail=disconnected"))
     return RedirectResponse("/dashboard")

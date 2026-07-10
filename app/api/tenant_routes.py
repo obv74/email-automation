@@ -87,6 +87,7 @@ def api_update_my_company(
             pricing_sheet_id=body.pricing_sheet_id,
             reply_mode=body.reply_mode,
             poll_interval_minutes=body.poll_interval_minutes,
+            ai_enabled=body.ai_enabled,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -144,6 +145,7 @@ def api_update_tenant(
             pricing_sheet_id=body.pricing_sheet_id,
             reply_mode=body.reply_mode,
             poll_interval_minutes=body.poll_interval_minutes,
+            ai_enabled=body.ai_enabled,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

@@ -37,6 +37,7 @@ class Tenant(Base):
     pricing_sheet_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     rules_file: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     reply_mode: Mapped[str] = mapped_column(String(16), default="draft")
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     poll_interval_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_polled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -188,6 +189,7 @@ def _migrate_sqlite(engine) -> None:
         "connected_gmail_email": "VARCHAR(255)",
         "rules_file": "VARCHAR(255)",
         "reply_mode": "VARCHAR(16) DEFAULT 'draft'",
+        "ai_enabled": "BOOLEAN DEFAULT 1",
         "poll_interval_minutes": "INTEGER",
         "last_polled_at": "DATETIME",
         "is_active": "BOOLEAN DEFAULT 1",
@@ -199,6 +201,7 @@ def _migrate_sqlite(engine) -> None:
         conn.execute(text("UPDATE tenants SET slug = id WHERE slug IS NULL OR slug = ''"))
         conn.execute(text("UPDATE tenants SET is_active = 1 WHERE is_active IS NULL"))
         conn.execute(text("UPDATE tenants SET reply_mode = 'draft' WHERE reply_mode IS NULL OR reply_mode = ''"))
+        conn.execute(text("UPDATE tenants SET ai_enabled = 1 WHERE ai_enabled IS NULL"))
 
     if "message_logs" in insp.get_table_names():
         log_cols = {c["name"] for c in insp.get_columns("message_logs")}

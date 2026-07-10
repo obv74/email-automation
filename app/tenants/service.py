@@ -68,6 +68,7 @@ def tenant_to_dict(tenant: Tenant) -> dict:
         "pricing_sheet_url": pricing_sheet_url(sheet_id),
         "is_active": tenant.is_active,
         "reply_mode": tenant.reply_mode or settings.reply_mode,
+        "ai_enabled": True if tenant.ai_enabled is None else bool(tenant.ai_enabled),
         "poll_interval_minutes": tenant.poll_interval_minutes or settings.poll_gmail_interval_minutes,
     }
 
@@ -139,6 +140,7 @@ def create_tenant(
         pricing_sheet_id=pricing_sheet_id or settings.pricing_sheet_id or None,
         contact_email=contact_email,
         reply_mode=settings.reply_mode,
+        ai_enabled=True,
         is_active=True,
         owner_user_id=owner_user_id,
     )
@@ -156,6 +158,7 @@ def update_tenant_settings(
     pricing_sheet_id: Optional[str] = None,
     reply_mode: Optional[str] = None,
     poll_interval_minutes: Optional[int] = None,
+    ai_enabled: Optional[bool] = None,
 ) -> Tenant:
     if name is not None:
         tenant.name = name.strip()
@@ -169,6 +172,8 @@ def update_tenant_settings(
         if poll_interval_minutes < 1 or poll_interval_minutes > 1440:
             raise ValueError("poll_interval_minutes must be between 1 and 1440")
         tenant.poll_interval_minutes = poll_interval_minutes
+    if ai_enabled is not None:
+        tenant.ai_enabled = ai_enabled
     db.commit()
     db.refresh(tenant)
     return tenant

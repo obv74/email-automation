@@ -34,7 +34,7 @@ def _should_skip_thread(
         return None
     if existing.last_message_id != latest_message_id:
         return None  # new reply in thread — reprocess
-    if existing.status in ("processed", "ignored"):
+    if existing.status in ("processed", "ignored", "monitored"):
         return f"already {existing.status}"
     if existing.status == "processing":
         age = datetime.utcnow() - existing.processed_at
@@ -122,6 +122,49 @@ def _mark_ignored(
     db.commit()
 
 
+def _mark_monitored(
+    db: Session,
+    tenant_id: str,
+    thread_id: str,
+    message_id: str,
+    subject: str,
+    inbound_body: str = "",
+) -> None:
+    """AI off: record the email without classify/extract/draft."""
+    existing = (
+        db.query(ProcessedThread)
+        .filter(
+            ProcessedThread.tenant_id == tenant_id,
+            ProcessedThread.gmail_thread_id == thread_id,
+        )
+        .first()
+    )
+    if existing:
+        existing.last_message_id = message_id
+        existing.status = "monitored"
+        existing.processed_at = datetime.utcnow()
+    else:
+        db.add(
+            ProcessedThread(
+                tenant_id=tenant_id,
+                gmail_thread_id=thread_id,
+                last_message_id=message_id,
+                status="monitored",
+            )
+        )
+    db.add(
+        MessageLog(
+            tenant_id=tenant_id,
+            gmail_thread_id=thread_id,
+            direction="monitored",
+            subject=subject,
+            inbound_body=inbound_body[:8000] if inbound_body else None,
+            reply_body="AI processing is off — email logged only.",
+        )
+    )
+    db.commit()
+
+
 async def process_thread(db: Session, tenant_id: str, thread_id: str, force: bool = False) -> dict:
     gmail = get_gmail_service(db, tenant_id)
     messages, conversation = fetch_full_thread(gmail, thread_id)
@@ -140,6 +183,18 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
     skip_reason = _should_skip_thread(existing, latest.message_id, force)
     if skip_reason:
         return {"status": "skipped", "thread_id": thread_id, "reason": skip_reason}
+
+    tenant_row = get_tenant(db, tenant_id)
+    ai_on = True if not tenant_row or tenant_row.ai_enabled is None else bool(tenant_row.ai_enabled)
+
+    # AI off: only monitor — log the email, no classify / extract / draft
+    if not ai_on and not force:
+        _mark_monitored(db, tenant_id, thread_id, latest.message_id, latest.subject, latest.body)
+        try:
+            mark_thread_as_read(gmail, thread_id)
+        except Exception as exc:
+            logger.warning("Could not mark thread read %s: %s", thread_id, exc)
+        return {"status": "monitored", "thread_id": thread_id}
 
     is_job, classify_reason = await is_moving_inquiry(conversation)
     if not is_job and not force:
@@ -162,7 +217,6 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
         job = await extract_job_from_thread(conversation)
         pricing_rows = fetch_pricing_rows(db, tenant_id)
         quote = compute_quote(job, pricing_rows)
-        tenant_row = get_tenant(db, tenant_id)
         rule_name, reply_body = generate_reply(
             job, quote, rules_file=tenant_row.rules_file if tenant_row else None
         )
