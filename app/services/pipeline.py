@@ -10,11 +10,12 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.models import MessageLog, ProcessedThread
 from app.tenants.service import get_tenant, tenant_reply_mode
+from app.extraction.enrich import enrich_job_for_pricing
 from app.extraction.llm import extract_job_from_thread, is_moving_inquiry
 from app.gmail.client import get_gmail_service
 from app.gmail.drafts import create_draft, send_message
 from app.gmail.threads import fetch_full_thread, list_recent_thread_ids, mark_thread_as_read
-from app.pricing.quote import compute_quote
+from app.pricing.quote import compute_quote, quote_failure_reason
 from app.pricing.sheets import fetch_pricing_rows
 from app.replies.generate import generate_reply
 
@@ -222,8 +223,22 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
             system_prompt=tenant_row.extraction_system_prompt if tenant_row else None,
             user_prompt_template=tenant_row.extraction_user_prompt if tenant_row else None,
         )
-        pricing_rows = fetch_pricing_rows(db, tenant_id)
+        job = enrich_job_for_pricing(job, conversation)
+        try:
+            pricing_rows = fetch_pricing_rows(db, tenant_id)
+        except Exception as exc:
+            logger.exception("Sheet pricing fetch failed for %s: %s", tenant_id, exc)
+            pricing_rows = []
         quote = compute_quote(job, pricing_rows)
+        if not quote:
+            logger.warning(
+                "QUOTE PENDING for thread %s: %s | extraction movers=%s truck=%s date=%s",
+                thread_id,
+                quote_failure_reason(job, pricing_rows),
+                job.num_movers,
+                job.truck_type,
+                job.move_date,
+            )
         rule_name, reply_body = generate_reply(
             job,
             quote,

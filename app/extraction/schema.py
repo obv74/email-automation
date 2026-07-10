@@ -35,5 +35,22 @@ class ExtractedJob(BaseModel):
             return [v] if v.strip() else []
         return v
 
+    @field_validator("num_movers", mode="before")
+    @classmethod
+    def coerce_movers(cls, v):
+        if v in (None, "", "null"):
+            return None
+        try:
+            return int(float(str(v).strip()))
+        except (TypeError, ValueError):
+            return None
+
+    @field_validator("truck_type", mode="before")
+    @classmethod
+    def coerce_truck(cls, v):
+        if v in (None, "", "null", "none", "None"):
+            return None
+        return str(v).strip()
+
     def needs_manual_pricing(self) -> bool:
         return self.num_movers is None or not self.move_date

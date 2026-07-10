@@ -51,6 +51,13 @@ def fetch_pricing_rows(db: Session, tenant_id: str, sheet_id: Optional[str] = No
     headers = [h.strip().lower().replace(" ", "_") for h in values[0]]
     rows: list[dict[str, Any]] = []
     for row in values[1:]:
-        item = {headers[i]: row[i] if i < len(row) else "" for i in range(len(headers))}
+        item = {
+            headers[i]: (row[i].strip() if isinstance(row[i], str) else row[i])
+            if i < len(row)
+            else ""
+            for i in range(len(headers))
+            if headers[i]
+        }
         rows.append(item)
+    logger.info("Loaded %s pricing rows for tenant %s from sheet %s", len(rows), tenant_id, sid)
     return rows
