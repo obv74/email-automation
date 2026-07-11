@@ -7,13 +7,16 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.schemas import CreateTenantBody, ExtractThreadBody, MessageLogOut, TenantOut, UpdateTenantBody
+from app.api.schemas import CreateTenantBody, ExtractTextBody, ExtractThreadBody, MessageLogOut, TenantOut, UpdateTenantBody
 from app.auth.deps import get_current_user, require_tenant_access
 from app.auth.google_oauth import disconnect_gmail
 from app.db.models import MessageLog, ProcessedThread, User, get_db
+from app.extraction.enrich import enrich_job_for_pricing
+from app.extraction.llm import extract_job_from_thread
 from app.gmail.client import get_gmail_service
 from app.gmail.drafts import send_draft, send_message
 from app.gmail.threads import fetch_full_thread, list_recent_thread_ids, list_thread_previews
+from app.pricing.sheets import append_extracted_job
 from app.services.draft_sync import purge_logs_for_missing_threads, sync_draft_logs
 from app.services.pipeline import extract_chosen_thread, poll_unread_threads, process_thread
 from app.tenants.service import (
@@ -332,6 +335,73 @@ def api_list_unread(
         }
     except RuntimeError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/tenants/{tenant_slug}/extract-text")
+async def api_extract_text(
+    tenant_slug: str,
+    body: ExtractTextBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Paste email text → structured job categories.
+    Does not read Gmail. Best for testing examples and phone copy/paste.
+    """
+    tenant = require_tenant_access(db, user, tenant_slug)
+    text = (body.text or "").strip()
+    if len(text) < 20:
+        raise HTTPException(400, "Paste more of the email thread (at least a few lines).")
+
+    try:
+        job = await extract_job_from_thread(
+            text,
+            system_prompt=tenant.extraction_system_prompt,
+            user_prompt_template=tenant.extraction_user_prompt,
+        )
+        job = enrich_job_for_pricing(job, text)
+    except Exception as exc:
+        logger.exception("Text extract failed for %s", tenant_slug)
+        raise HTTPException(500, f"Extract failed: {exc}") from exc
+
+    extraction = job.model_dump()
+    sheet_ok = False
+    if body.save_to_sheet:
+        sheet_ok = append_extracted_job(
+            db,
+            tenant.id,
+            job,
+            gmail_thread_id="",
+            email_type="paste",
+        )
+
+    log_id = None
+    if body.save_to_log:
+        log = MessageLog(
+            tenant_id=tenant.id,
+            gmail_thread_id=None,
+            direction="extracted",
+            subject="Pasted email extract",
+            inbound_body=text[:8000],
+            extraction_json=json.dumps(extraction),
+            reply_body="Pasted text extract — no Gmail read, no reply drafted.",
+            rule_name="paste_extract",
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+        log_id = log.id
+
+    return {
+        "status": "extracted",
+        "email_type": "paste",
+        "extraction": extraction,
+        "title_block": job.title_block(),
+        "booking_entry_block": job.booking_entry_block(),
+        "copyable": job.copyable_full(),
+        "saved_to_sheet": sheet_ok,
+        "log_id": log_id,
+    }
 
 
 @router.post("/tenants/{tenant_slug}/extract")

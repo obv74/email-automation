@@ -104,3 +104,11 @@ class MessageLogOut(BaseModel):
 class ExtractThreadBody(BaseModel):
     """Paste a Gmail URL or thread id — only that thread is read."""
     thread_ref: str = Field(min_length=5, max_length=2000)
+
+
+class ExtractTextBody(BaseModel):
+    """Paste raw email / thread text — no Gmail required."""
+    text: str = Field(min_length=20, max_length=100000)
+    save_to_sheet: bool = False
+    save_to_log: bool = True
+

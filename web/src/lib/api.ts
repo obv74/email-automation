@@ -145,6 +145,33 @@ export const api = {
       token
     ),
 
+  extractText: (
+    token: string,
+    slug: string,
+    text: string,
+    opts?: { save_to_sheet?: boolean; save_to_log?: boolean }
+  ) =>
+    request<{
+      status: string;
+      extraction: Record<string, unknown>;
+      title_block: string;
+      booking_entry_block: string;
+      copyable: string;
+      saved_to_sheet: boolean;
+      log_id: number | null;
+    }>(
+      `/api/tenants/${slug}/extract-text`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          text,
+          save_to_sheet: opts?.save_to_sheet ?? false,
+          save_to_log: opts?.save_to_log ?? true,
+        }),
+      },
+      token
+    ),
+
   listRecentThreads: (token: string, slug: string) =>
     request<{ count: number; previews: ThreadPreview[] }>(
       `/api/tenants/${slug}/threads/recent`,
