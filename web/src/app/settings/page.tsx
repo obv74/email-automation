@@ -152,12 +152,16 @@ function SettingsForm() {
           <section className="card space-y-4">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="font-semibold text-slate-900">AI summarize & reply</h2>
+                <h2 className="font-semibold text-slate-900">Mail auto-polling</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  On: classify emails (booked / inquiry / ignore), extract job fields, draft replies
-                  for inquiries only.
+                  <strong>On:</strong> server automatically reads unread inbox mail on a timer
+                  (classify / extract / draft).
                   <br />
-                  Off: inbox is not touched at all (no read, no drafts, no logging).
+                  <strong>Off:</strong> inbox is never auto-read. Use the{" "}
+                  <Link href="/extract" className="font-medium text-brand-600 hover:text-brand-700">
+                    Extract
+                  </Link>{" "}
+                  page to paste email text instead (recommended while testing).
                 </p>
                 <Link
                   href="/prompts"
@@ -171,6 +175,7 @@ function SettingsForm() {
                 type="button"
                 role="switch"
                 aria-checked={aiEnabled}
+                aria-label="Mail auto-polling"
                 onClick={() => setAiEnabled(!aiEnabled)}
                 className={`relative h-7 w-12 flex-shrink-0 rounded-full transition ${
                   aiEnabled ? "bg-brand-600" : "bg-slate-300"
@@ -183,6 +188,12 @@ function SettingsForm() {
                 />
               </button>
             </div>
+            <p className="text-xs text-slate-500">
+              Status:{" "}
+              <strong className={aiEnabled ? "text-emerald-700" : "text-slate-700"}>
+                {aiEnabled ? "Polling ENABLED" : "Polling DISABLED"}
+              </strong>
+            </p>
           </section>
 
           <section className="card space-y-4">
@@ -233,7 +244,7 @@ function SettingsForm() {
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                Auto-check inbox (minutes)
+                Poll interval (minutes)
               </label>
               <input
                 type="number"
@@ -242,7 +253,11 @@ function SettingsForm() {
                 className="input-field"
                 value={pollMinutes}
                 onChange={(e) => setPollMinutes(Number(e.target.value))}
+                disabled={!aiEnabled}
               />
+              <p className="mt-1 text-xs text-slate-500">
+                Only used when Mail auto-polling is On. Does not turn polling on by itself.
+              </p>
             </div>
           </section>
 
