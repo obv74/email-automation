@@ -40,7 +40,7 @@ export default function ExtractPage() {
       setCopyable(result.copyable || "");
       setNotice(
         result.saved_to_sheet
-          ? "Extracted and saved to ExtractedJobs sheet."
+          ? "Extracted and saved to your Google Sheet."
           : "Extracted — review categories below. (Sheet save was off.)"
       );
     } catch (err) {
@@ -105,7 +105,25 @@ export default function ExtractPage() {
                 onChange={(e) => setSaveSheet(e.target.checked)}
                 className="rounded border-slate-300"
               />
-              Also save row to Google Sheet tab <code className="text-xs">ExtractedJobs</code>
+              <span>
+                Also save row to{" "}
+                {company?.pricing_sheet_url ? (
+                  <a
+                    href={company.pricing_sheet_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-brand-600 underline decoration-brand-300 underline-offset-2 hover:text-brand-700"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Google Sheet
+                  </a>
+                ) : (
+                  <span className="font-medium text-slate-700">Google Sheet</span>
+                )}
+                {!company?.pricing_sheet_url ? (
+                  <span className="text-slate-400"> (set sheet ID in Settings)</span>
+                ) : null}
+              </span>
             </label>
             <button
               type="button"

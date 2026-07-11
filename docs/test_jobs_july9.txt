@@ -1,20 +1,17 @@
-# Moving Helper extract test cases — 7/9 Thursday (Richard / Mystery Team)
-# Paste ONE block at a time into Extract (not this whole file).
-# Expected: booked/extract-only; fill TITLE + BOOKING + Y/N + pricing when present.
+# HOW TO USE
+# 1. Copy ONLY the text between PASTE START and PASTE END
+# 2. Open app → Extract → paste → Extract categories
+# 3. Compare the app output (TITLE / BOOKING format) to EXPECTED ANSWER
+#
+# The app always outputs Robin's template (=== TITLE === ...).
+# That TEMPLATE SHAPE is different from EXPECTED ANSWER below —
+# compare the FACTS (name, phone, address), not the layout.
 
-================================================================================
-TEST 1 — Joshua Soberano (unload only, 15ft, North Bethesda)
-Expected highlights:
-  Name: Joshua Soberano | Phone: (404) 450-7688 | Email: joshua.soberano@outlook.com
-  Date: 2026-07-09 | Time: 1pm / 1-3pm (as early as 12pm)
-  City: North Bethesda, MD | Service: unload only
-  Load: (empty) | Unload: Wentworth House: 5411 McGrath Blvd, North Bethesda, MD 20852
-  Notes: 9th floor; loading dock beside elevator; 150-200ft walk; luggage cart; U-Haul hand truck
-  Truck: 15ft | Movers: 2 | Source: U-Haul
-  Min hours: 2 | Rate: $159/hr
-  Packing/Unpacking: N | Assembly: N | Over 250: N | Heaviest: none noted
-================================================================================
+################################################################################
+# TEST 1 — Joshua Soberano (unload only)
+################################################################################
 
+----- PASTE START (TEST 1) -----
 Joshua Soberano 1 pm unload 15ft truck North Bethesda, MD (404) 450-7688 | The apartment is on the 9th floor but the truck will be parked in the loading dock right beside the elevator for moving in. From the elevator it is about a 150-200ft walk to the apartment itself.
 Uhaul job pd 2hrs minimum $159/hr - CONF SENT 7/6
 
@@ -29,21 +26,28 @@ Uhaul job pd 2hrs minimum $159/hr
 joshua.soberano@outlook.com
 
 For the time, our preferred window is 1-3pm, but that would be the latest possible start time, and we could arrive as early as 12pm.
+----- PASTE END (TEST 1) -----
 
-================================================================================
-TEST 2 — Colette Godfrey (load only, 20ft, Alexandria)
-Expected highlights:
-  Name: Colette Godfrey | Phone: (703) 568-4611 | Email: coletteg1@aol.com
-  Date: 2026-07-09 | Time: 2 pm (customer said 2-4pm; confirmed 2 pm)
-  City: Alexandria, VA | Service: load only
-  Load: 9386 Mount Vernon Circle, Alexandria, VA 22309 | Unload: (empty)
-  Notes: no real long walks; one light sofa table may need stairs; fragile china/glassware/mirror
-  Inventory: garden planters, chest, chair, rug, side table, boxes, couch, fragile large mirror, china/glassware
-  Truck: 20ft | Movers: 2 | Source: U-Haul
-  Min hours: 2 | Rate: $159/hr | Super fragile: Y (china, glassware, mirror)
-  Packing/Unpacking: N | Assembly: N
-================================================================================
+----- EXPECTED ANSWER (TEST 1) — compare facts, not layout -----
+Client Name: Joshua Soberano
+Phone: (404) 450-7688
+Email: joshua.soberano@outlook.com
+Time: 1-3pm (as early as 12pm)   [or 1 pm]
+City, State: North Bethesda, MD
+Service: unload only
+Load Address: (empty)
+Unload Address: Wentworth House: 5411 McGrath Blvd, North Bethesda, MD 20852
+Special Notes: 9th floor; loading dock beside elevator; 150-200ft walk; luggage cart; U-Haul hand truck
+Inventory: couch, loveseat, bedframe, headboard, boxspring, queen mattress, twin mattress, large table, rugs, side tables
+Heaviest: none noted | Over 250: N | Packing: N | Unpacking: N | Assembly: N
+Truck: 15ft | Movers: 2 | Booking source: U-Haul
+Minimum hours: 2 | Hourly rate: $159/hr
 
+################################################################################
+# TEST 2 — Colette Godfrey (load only)
+################################################################################
+
+----- PASTE START (TEST 2) -----
 Colette Godfrey 2 pm load 20ft truck Alexandria, VA (703) 568-4611 | No real long walks, possibly one light sofa table - that’s the only thing requiring stairs.
 Uhaul job pd 2hrs minimum $159/hr
 
@@ -58,22 +62,28 @@ Uhaul job pd 2hrs minimum $159/hr
 coletteg1@aol.com
 
 Preferred time 2-4pm. Extra hour is $159 for 2 movers.
+----- PASTE END (TEST 2) -----
 
-================================================================================
-TEST 3 — Chris Walton (load only, 15ft, Springfield)
-Expected highlights:
-  Name: Chris Walton | Phone: (703) 618-8556 | Email: walton.chris@gmail.com
-  Date: 2026-07-09 | Time: 3:30-4 pm
-  City: Springfield, VA | Service: load only
-  Load: 6223 Rathlin Dr, Springfield, VA 22152 (MH listing also shows 6225 — prefer customer email 6223)
-  Unload: (empty)
-  Notes: 2nd floor mattresses; truck partially loaded from earlier address; stairs
-  Inventory: king mattress, twin mattress, small cabinet, packed boxes
-  Truck: 15ft | Movers: 2 | Source: U-Haul
-  Min hours: 2 | Rate: $159/hr
-  Packing/Unpacking: N
-================================================================================
+----- EXPECTED ANSWER (TEST 2) — compare facts, not layout -----
+Client Name: Colette Godfrey
+Phone: (703) 568-4611
+Email: coletteg1@aol.com
+Time: 2 pm
+City, State: Alexandria, VA
+Service: load only
+Load Address: 9386 Mount Vernon Circle, Alexandria, VA 22309
+Unload Address: (empty)
+Special Notes: no real long walks; light sofa table may need stairs; fragile china/glassware/mirror
+Inventory: garden planters, chest, chair, rug, side table, boxes, couch, fragile large mirror, china/glassware
+Super fragile: Y | Packing: N | Unpacking: N | Assembly: N
+Truck: 20ft | Movers: 2 | Booking source: U-Haul
+Minimum hours: 2 | Hourly rate: $159/hr
 
+################################################################################
+# TEST 3 — Chris Walton (load only)
+################################################################################
+
+----- PASTE START (TEST 3) -----
 Chris Walton 3:30-4 pm load 15ft truck Springfield, VA (703) 618-8556 |
 Uhaul job pd 2hrs minimum $159/hr
 
@@ -87,3 +97,19 @@ walton.chris@gmail.com
 
 Confirming your job tomorrow with 3:30-4 pm window of arrival.
 Uhaul job pd 2hrs minimum $159/hr
+----- PASTE END (TEST 3) -----
+
+----- EXPECTED ANSWER (TEST 3) — compare facts, not layout -----
+Client Name: Chris Walton
+Phone: (703) 618-8556
+Email: walton.chris@gmail.com
+Time: 3:30-4 pm
+City, State: Springfield, VA
+Service: load only
+Load Address: 6223 Rathlin Dr, Springfield, VA 22152
+Unload Address: (empty)
+Special Notes: 2nd floor; truck partially loaded from earlier address
+Inventory: king mattress, twin mattress, small cabinet, packed boxes
+Packing: N | Unpacking: N | Assembly: N
+Truck: 15ft | Movers: 2 | Booking source: U-Haul
+Minimum hours: 2 | Hourly rate: $159/hr
