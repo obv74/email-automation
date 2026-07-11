@@ -16,6 +16,10 @@ if _settings.oauth_allow_insecure_transport or (
 ):
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
+# Google may return extra scopes (e.g. spreadsheets.readonly alongside spreadsheets)
+# when the account previously granted them — allow that instead of failing Connect.
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -60,7 +64,7 @@ def get_authorization_url(state: str) -> str:
     flow = create_oauth_flow(state=state)
     url, _ = flow.authorization_url(
         access_type="offline",
-        include_granted_scopes="true",
+        include_granted_scopes="false",
         prompt="consent select_account",
     )
     _pending_flows[state] = flow
