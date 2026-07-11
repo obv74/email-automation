@@ -30,13 +30,8 @@ EXTRACTION_SCHEMA_HINT = """{
 
 # One compact few-shot — big accuracy win on 3B models, still cheap.
 FEW_SHOT_EXAMPLE = """
-EXAMPLE
-Input:
-Joshua Soberano 1 pm unload 15ft truck North Bethesda, MD (404) 450-7688 | 9th floor, loading dock by elevator, 150-200ft walk.
-Unload: 5411 McGrath Blvd, North Bethesda, MD 20852. Inventory: couch, loveseat, bedframe, mattresses, table, rugs. No oversized/heavy. Uhaul pd 2hrs minimum $159/hr. joshua.soberano@outlook.com
-
-Output:
-{"customer_name":"Joshua Soberano","customer_phone":"(404) 450-7688","customer_email":"joshua.soberano@outlook.com","city_state":"North Bethesda, MD","load_address":null,"unload_address":"5411 McGrath Blvd, North Bethesda, MD 20852","service_requested":"unload","move_date":null,"move_time":"1 pm","inventory":["couch","loveseat","bedframe","mattresses","table","rugs"],"heaviest_item":"none noted","special_notes":"9th floor; loading dock by elevator; 150-200ft walk; customer has U-Haul hand truck","customer_requests":["unload only","manpower to apartment"],"promises_made":[],"minimum_hours":"2","hourly_rate":"$159/hr","num_movers":2,"truck_type":"15ft","booking_source":"U-Haul","summary":"Joshua Soberano unload 15ft U-Haul at Wentworth House, North Bethesda; 9th floor via loading-dock elevator; 2hr min $159/hr."}
+EXAMPLE →
+{"customer_name":"Joshua Soberano","customer_phone":"(404) 450-7688","customer_email":"joshua.soberano@outlook.com","city_state":"North Bethesda, MD","load_address":null,"unload_address":"5411 McGrath Blvd, North Bethesda, MD 20852","service_requested":"unload","move_date":null,"move_time":"1 pm","inventory":["couch","loveseat","bedframe","mattresses","table","rugs"],"heaviest_item":"none noted","special_notes":"9th floor; dock elevator; 150-200ft walk","customer_requests":["unload only"],"promises_made":[],"minimum_hours":"2","hourly_rate":"$159/hr","num_movers":2,"truck_type":"15ft","booking_source":"U-Haul","summary":"Unload 15ft U-Haul for Joshua at North Bethesda 9th floor."}
 """
 
 

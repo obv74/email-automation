@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     ollama_max_thread_chars: int = 4500
     ollama_num_predict: int = 512
     # Extract-specific (smaller = faster on weak CPU; enrich fills the rest)
-    ollama_extract_num_predict: int = 280
-    ollama_extract_max_chars: int = 4500
+    ollama_extract_num_predict: int = 400
+    ollama_extract_max_chars: int = 3500
 
     classify_enabled: bool = True
     classify_max_chars: int = 2500

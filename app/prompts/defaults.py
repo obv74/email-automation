@@ -20,24 +20,25 @@ CLASSIFY_SYSTEM = (
     "is clear. Prefer unclear over ignore when unsure. Never invent certainty."
 )
 
-EXTRACTION_SYSTEM = """Extract moving-job fields as compact JSON. No markdown. No extra keys.
+EXTRACTION_SYSTEM = """Extract moving-job fields as ONE compact JSON object. No markdown.
+Keep strings SHORT. inventory max 8 short items. summary max 25 words. promises_made usually [].
 Rules:
-1) Name: line like "First Last 1 pm unload…" → customer_name = First Last.
-2) Phone (###) ###-#### → customer_phone. email → customer_email.
-3) unload/load only: set load_address or unload_address correctly; other null.
-4) Inventory as short item list. special_notes = stairs/floor/elevator/walk/pads.
-5) promises_made = only what THIS company promised. Customer U-Haul gear → special_notes, not promises.
-6) truck_type like 15ft. U-Haul/Moving Helper with no crew size → num_movers=2.
-7) "2hrs minimum $159/hr" → minimum_hours=2, hourly_rate=$159/hr.
-8) summary = 1-2 short sentences. null if unknown. [] if no list items."""
+1) "First Last 1 pm unload…" → customer_name=First Last
+2) phone/email from text
+3) unload vs load addresses
+4) truck like 15ft; U-Haul/Moving Helper → num_movers=2 if unknown
+5) "2hrs minimum $159/hr" → minimum_hours=2, hourly_rate=$159/hr
+6) Customer U-Haul gear → special_notes, NOT promises_made
+Always finish valid JSON (close all braces/quotes)."""
 
-EXTRACTION_USER = """Return JSON only for this email.
+EXTRACTION_USER = """JSON only.
 {schema}
 {example}
-NOW extract this email:
+Email:
 ---
 {email}
----"""
+---
+Reply with complete valid JSON now."""
 
 REPLY_TEMPLATE = """Hi {customer_name},
 

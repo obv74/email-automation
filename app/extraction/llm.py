@@ -26,7 +26,98 @@ def _parse_json_response(raw: str) -> dict:
         lines = text.split("\n")
         lines = [ln for ln in lines if not ln.strip().startswith("```")]
         text = "\n".join(lines).strip()
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        repaired = _repair_truncated_json(text)
+        return json.loads(repaired)
+
+
+def _repair_truncated_json(text: str) -> str:
+    """
+    Ollama often hits num_predict mid-string on weak CPUs ("Unterminated string").
+    Close open quotes / arrays / objects so we can still use partial extraction.
+    """
+    s = text.strip()
+    if not s:
+        raise json.JSONDecodeError("empty", text, 0)
+
+    # If model returned leading junk before {
+    start = s.find("{")
+    if start > 0:
+        s = s[start:]
+
+    in_string = False
+    escape = False
+    stack: list[str] = []
+    last_good = 0
+
+    for i, ch in enumerate(s):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+                last_good = i
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+        if ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+            last_good = i
+        elif ch in "}]":
+            if stack and stack[-1] == ch:
+                stack.pop()
+            last_good = i
+        elif ch in ",:":
+            last_good = i
+
+    # Cut back to a safer point if we died mid-string / mid-value
+    if in_string:
+        # close the string, then drop dangling incomplete key if needed
+        s = s + '"'
+        # if we closed a string that was a key waiting for ":", leave as incomplete — trim to last comma/brace
+        trimmed = s.rstrip()
+        # remove trailing comma or colon leftovers
+        while trimmed and trimmed[-1] in ",:":
+            trimmed = trimmed[:-1].rstrip()
+        s = trimmed
+        # rebuild stack by re-scan
+        in_string = False
+        escape = False
+        stack = []
+        for ch in s:
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                stack.append("}")
+            elif ch == "[":
+                stack.append("]")
+            elif ch in "}]" and stack and stack[-1] == ch:
+                stack.pop()
+
+    # Remove trailing incomplete ", "key"" without value
+    s = s.rstrip()
+    if s.endswith(","):
+        s = s[:-1].rstrip()
+
+    # Close open arrays/objects
+    while stack:
+        s += stack.pop()
+
+    return s
 
 
 def _coerce_extracted(data: dict[str, Any]) -> ExtractedJob:
@@ -81,23 +172,36 @@ async def extract_job_from_thread(
     prompt = build_extraction_prompt(conversation, user_prompt_template)
     system = (system_prompt or EXTRACTION_SYSTEM).strip() or EXTRACTION_SYSTEM
     last_error: Optional[str] = None
-    # Prefer 1 successful pass; retry once only if JSON invalid (saves time on CPU).
+    last_raw: Optional[str] = None
+    # Prefer 1 successful pass; retry once with a higher token budget if truncated.
     for attempt in range(2):
         user_prompt = prompt if attempt == 0 else build_retry_prompt(conversation, last_error or "invalid JSON")
+        predict = settings.ollama_extract_num_predict
+        if attempt == 1:
+            predict = max(predict, 450)
         raw = await _call_ollama(
             user_prompt,
             system=system,
-            num_predict=settings.ollama_extract_num_predict,
+            num_predict=predict,
             temperature=0.0,
         )
+        last_raw = raw
         try:
             data = _parse_json_response(raw)
             return _coerce_extracted(data)
         except (json.JSONDecodeError, ValidationError) as exc:
             last_error = str(exc)
-            logger.warning("Extraction validation failed (attempt %s): %s", attempt + 1, exc)
+            logger.warning(
+                "Extraction validation failed (attempt %s): %s | raw_tail=%r",
+                attempt + 1,
+                exc,
+                (raw or "")[-180:],
+            )
 
-    raise OllamaError(f"Failed to extract valid job JSON after retries: {last_error}")
+    raise OllamaError(
+        f"Failed to extract valid job JSON after retries: {last_error}. "
+        f"Raw tail: {(last_raw or '')[-120:]!r}"
+    )
 
 
 async def classify_email(
