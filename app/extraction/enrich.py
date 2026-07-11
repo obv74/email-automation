@@ -337,6 +337,18 @@ def _infer_move_time(text: str) -> Optional[str]:
         if early and early.group(1).lower().replace(" ", "") not in window.lower():
             return f"{window} (as early as {early.group(1)})"
         return window
+    # Ops lead line: "Joshua Soberano 1 pm unload..."
+    lead = re.search(
+        r"^\s*[A-Z][a-zA-Z'''\-]+(?:\s+[A-Z][a-zA-Z'''\-]+){0,3}\s+"
+        r"(\d{1,2}(?::\d{2})?(?:\s*[-–to]+\s*\d{1,2}(?::\d{2})?)?\s*(?:am|pm))",
+        text or "",
+        re.I | re.M,
+    )
+    if lead:
+        start = re.sub(r"\s+", " ", lead.group(1)).strip()
+        if early and early.group(1).lower() not in start.lower():
+            return f"{start} (as early as {early.group(1)})"
+        return start
     if early:
         return f"as early as {early.group(1)}"
     return None
@@ -386,6 +398,17 @@ def _infer_access_notes(text: str) -> Optional[str]:
         bit = re.split(r"\bto\b", bit, maxsplit=1)[0].strip() + " walk"
         bit = re.sub(r"\s+walk\s+walk$", " walk", bit)
         parts.append(bit)
+    elif re.search(r"no real long walks?", raw, re.I):
+        parts.append("no real long walks")
+
+    sofa = re.search(
+        r"((?:possibly\s+)?(?:one\s+)?light\s+sofa\s+table[^.!;\n]{0,70}stairs?)",
+        raw,
+        re.I,
+    )
+    if sofa:
+        bit = re.sub(r"\s+", " ", sofa.group(1)).strip(" ,.;")
+        parts.append(bit)
 
     if re.search(r"partially\s+loaded", raw, re.I):
         parts.append("truck partially loaded from earlier address")
@@ -399,6 +422,9 @@ def _infer_access_notes(text: str) -> Optional[str]:
         else:
             parts.append("hand truck available")
 
+    if _FRAGILE_RE.search(raw) and re.search(r"china|glassware|mirror", raw, re.I):
+        parts.append("fragile china/glassware/mirror")
+
     if not parts:
         return None
     seen: set[str] = set()
@@ -409,7 +435,59 @@ def _infer_access_notes(text: str) -> Optional[str]:
             continue
         seen.add(key)
         cleaned.append(p)
-    return "; ".join(cleaned[:5])
+    return "; ".join(cleaned[:6])
+
+
+def _notes_are_messy(notes: Optional[str]) -> bool:
+    if not notes:
+        return False
+    if _notes_are_bloated(notes):
+        return True
+    nl = notes.lower()
+    if nl.count("hand truck") >= 2 or nl.count("luggage cart") >= 2:
+        return True
+    if "hand truck walk" in nl:
+        return True
+    return False
+
+
+def _infer_inventory(text: str) -> list[str]:
+    """Pull furniture list from 'inventory ... includes 1 couch, 1 loveseat...'."""
+    m = re.search(
+        r"(?:inventory.{0,100}?includes?|will includes?|items?(?:\s+include)?)\s*[:\s]+(.+)",
+        text or "",
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not m:
+        # numbered / comma lists on their own lines after Need help / inventory cues
+        m = re.search(
+            r"(?:need help with loading|inventory list)\s*[:\n]+\s*(.+)",
+            text or "",
+            re.IGNORECASE | re.DOTALL,
+        )
+    if not m:
+        return []
+    chunk = m.group(1)
+    chunk = re.split(
+        r"\b(?:We also|It is for|Other than|Uhaul job|U-Haul job|For the time|Best,|Thank)\b",
+        chunk,
+        maxsplit=1,
+        flags=re.I,
+    )[0]
+    items: list[str] = []
+    for part in re.split(r",|\band\b", chunk):
+        part = re.sub(r"^\s*\d+\s+", "", part.strip())
+        part = re.sub(r"\s+", " ", part).strip(" .;:")
+        if len(part) < 3:
+            continue
+        if part.lower() in {"etc", "etc.", "smaller items"}:
+            continue
+        if len(part) > 60:
+            continue
+        items.append(part)
+        if len(items) >= 12:
+            break
+    return items
 
 
 def _notes_look_hallucinated(notes: Optional[str], raw: str) -> bool:
@@ -641,16 +719,17 @@ def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> Extract
         not data.get("special_notes")
         or _notes_look_hallucinated(data.get("special_notes"), raw)
         or _notes_are_bloated(data.get("special_notes"))
+        or _notes_are_messy(data.get("special_notes"))
     ):
         data["special_notes"] = access
     elif _notes_look_hallucinated(data.get("special_notes"), raw):
         data["special_notes"] = _scrub_hallucinated_notes(data.get("special_notes"), raw) or access
-    elif access and data.get("special_notes"):
-        notes = data["special_notes"]
-        for bit in access.split("; "):
-            if bit and bit.lower() not in notes.lower():
-                notes = f"{notes}; {bit}"
-        data["special_notes"] = notes
+    # Do not merge access into LLM notes — small models create duplicate hand-truck/walk junk
+
+    if not data.get("inventory"):
+        inferred_inv = _infer_inventory(raw)
+        if inferred_inv:
+            data["inventory"] = inferred_inv
 
     promises = list(data.get("promises_made") or [])
     cleaned = []
