@@ -28,10 +28,10 @@ EXTRACTION_SCHEMA_HINT = """{
   "summary": string
 }"""
 
-# One compact few-shot — big accuracy win on 3B models, still cheap.
+# Different job than typical unload tests — reduces copy-from-example errors.
 FEW_SHOT_EXAMPLE = """
-EXAMPLE →
-{"customer_name":"Joshua Soberano","customer_phone":"(404) 450-7688","customer_email":"joshua.soberano@outlook.com","city_state":"North Bethesda, MD","load_address":null,"unload_address":"5411 McGrath Blvd, North Bethesda, MD 20852","service_requested":"unload","move_date":null,"move_time":"1 pm","inventory":["couch","loveseat","bedframe","mattresses","table","rugs"],"heaviest_item":"none noted","special_notes":"9th floor; dock elevator; 150-200ft walk","customer_requests":["unload only"],"promises_made":[],"minimum_hours":"2","hourly_rate":"$159/hr","num_movers":2,"truck_type":"15ft","booking_source":"U-Haul","summary":"Unload 15ft U-Haul for Joshua at North Bethesda 9th floor."}
+FORMAT EXAMPLE (do NOT copy these values — they are fake):
+{"customer_name":"Alex Kim","customer_phone":"(202) 555-0100","customer_email":"alex@example.com","city_state":"Arlington, VA","load_address":"100 Main St Arlington VA","unload_address":null,"service_requested":"load only","move_date":null,"move_time":"10 am","inventory":["desk","chair","boxes"],"heaviest_item":"desk","special_notes":"2nd floor no elevator","customer_requests":["load only"],"promises_made":[],"minimum_hours":"3","hourly_rate":"$120/hr","num_movers":2,"truck_type":"20ft","booking_source":"direct","summary":"Load-only for Alex in Arlington 2nd floor."}
 """
 
 
@@ -53,8 +53,9 @@ def build_extraction_prompt(conversation: str, user_template: Optional[str] = No
 
 
 def build_retry_prompt(conversation: str, error: str) -> str:
-    # Keep retry tiny — speed matters on CPU
+    # Keep retry tiny — speed matters on CPU. No few-shot on retry (avoids leakage).
     return f"""Fix JSON only. Error: {error}
+Use ONLY facts from the email. null if missing. Never invent phone/price/name.
 Schema: {EXTRACTION_SCHEMA_HINT}
 Email:
 ---

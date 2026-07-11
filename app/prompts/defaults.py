@@ -21,24 +21,26 @@ CLASSIFY_SYSTEM = (
 )
 
 EXTRACTION_SYSTEM = """Extract moving-job fields as ONE compact JSON object. No markdown.
+CRITICAL: Use ONLY facts present in the email. If a field is not in the email, use null or [].
+NEVER copy names, phones, emails, prices, or addresses from the format example.
 Keep strings SHORT. inventory max 8 short items. summary max 25 words. promises_made usually [].
 Rules:
-1) "First Last 1 pm unload…" → customer_name=First Last
-2) phone/email from text
-3) unload vs load addresses
-4) truck like 15ft; U-Haul/Moving Helper → num_movers=2 if unknown
-5) "2hrs minimum $159/hr" → minimum_hours=2, hourly_rate=$159/hr
+1) Name only if stated (signature "Best, Joshua" → "Joshua"). Do not invent a last name.
+2) phone/email only if present in the email text
+3) unload vs load addresses from the email
+4) truck like 15ft if mentioned; U-Haul/Moving Helper → num_movers=2 if crew size unknown
+5) minimum_hours / hourly_rate ONLY if the email states them — otherwise null
 6) Customer U-Haul gear → special_notes, NOT promises_made
 Always finish valid JSON (close all braces/quotes)."""
 
-EXTRACTION_USER = """JSON only.
+EXTRACTION_USER = """JSON only. Extract from THIS email — ignore example values.
 {schema}
 {example}
 Email:
 ---
 {email}
 ---
-Reply with complete valid JSON now."""
+Complete valid JSON now. null for anything not in the email."""
 
 REPLY_TEMPLATE = """Hi {customer_name},
 

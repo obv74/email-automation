@@ -77,15 +77,21 @@ def _infer_truck(text: str) -> Optional[str]:
     return normalize_truck_type(f"{m.group(1)}ft")
 
 
+_SIGN_OFF_NAME_RE = re.compile(
+    r"(?i)(?:^|\n)\s*(?:best|thanks|thank you|regards|sincerely)[,!]?\s*\n\s*([A-Z][a-zA-Z'''\-]+(?:\s+[A-Z][a-zA-Z'''\-]+)?)\s*$"
+)
+
+
 def _infer_name(text: str) -> Optional[str]:
     m = _LEAD_NAME_RE.search(text or "")
-    if not m:
-        return None
-    name = m.group(1).strip()
-    # Avoid capturing service words
-    if name.lower() in {"the", "truck", "unload", "load", "uhaul", "moving"}:
-        return None
-    return name
+    if m:
+        name = m.group(1).strip()
+        if name.lower() not in {"the", "truck", "unload", "load", "uhaul", "moving"}:
+            return name
+    m = _SIGN_OFF_NAME_RE.search((text or "").strip())
+    if m:
+        return m.group(1).strip()
+    return None
 
 
 _ASSEMBLY_YES_RE = re.compile(
