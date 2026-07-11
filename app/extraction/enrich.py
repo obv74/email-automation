@@ -115,25 +115,25 @@ _EARLY_AS_RE = re.compile(
     r"as\s+early\s+as\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))",
     re.IGNORECASE,
 )
-_FLOOR_ACCESS_RE = re.compile(
-    r"(\d+(?:st|nd|rd|th)?\s+floor[^.!\n]{0,120})",
-    re.IGNORECASE,
-)
 _WALK_RE = re.compile(
     r"(\d+\s*[-–to]+\s*\d+\s*(?:ft|feet|foot)\s+walk[^.!\n]{0,40})",
     re.IGNORECASE,
 )
-_ELEVATOR_RE = re.compile(
-    r"((?:no\s+)?elevator|loading\s+dock[^.!\n]{0,60})",
+_HAND_TRUCK_RE = re.compile(r"\b(?:u-?haul\s+)?hand\s+truck\b", re.IGNORECASE)
+_STREET_ADDR_RE = re.compile(
+    r"(?:(?P<label>[A-Za-z][A-Za-z0-9'&. \-]{1,40})\s*:\s*)?"
+    r"(?P<street>\d{1,6}\s+[A-Za-z0-9.' \-]+?"
+    r"(?:Blvd|Boulevard|St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Ct|Court|Way|Pkwy|Parkway|Pl|Place)\.?)"
+    r"(?:,?\s*(?P<citystate>[A-Za-z .]+,\s*[A-Z]{2}(?:\s+\d{5}(?:-\d{4})?)?))?",
     re.IGNORECASE,
 )
-_HAND_TRUCK_RE = re.compile(
-    r"((?:u-?haul\s+)?hand\s+truck[^.!\n]{0,40})",
+_INCOMPLETE_ADDR_TAIL_RE = re.compile(
+    r"[\s.]*\b(?:the\s+apartment\s+is|apartment\s+is|the\s+truck\s+will|"
+    r"from\s+the\s+elevator|inventory|preferred|it\s+will)\b.*$",
     re.IGNORECASE,
 )
-_UNLOAD_AT_RE = re.compile(
-    r"(?:unloading\s+at|unload\s+address|deliver(?:y|ing)?\s+to)\s*[:\-]?\s*"
-    r"([^\n]{10,120})",
+_FLUFF_ADDR_PREFIX_RE = re.compile(
+    r"^(?:the\s+)?(?:apartment\s+complex|complex|building|property)\s+",
     re.IGNORECASE,
 )
 _EXPLICIT_ONE_MOVER_RE = re.compile(
@@ -146,6 +146,42 @@ def _normalize_addr(value: Optional[str]) -> str:
     if not value:
         return ""
     return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def _clean_address(value: Optional[str], raw: str = "") -> Optional[str]:
+    """Turn messy LLM/email address blobs into 'Label: street, City, ST ZIP'."""
+    text = (value or "").strip()
+    if not text and not raw:
+        return None
+
+    for source in (text, raw):
+        if not source:
+            continue
+        m = _STREET_ADDR_RE.search(source)
+        if not m:
+            continue
+        label = (m.group("label") or "").strip(" :")
+        street = re.sub(r"\s+", " ", (m.group("street") or "").strip(" ,."))
+        citystate = re.sub(r"\s+", " ", (m.group("citystate") or "").strip(" ,."))
+        if label:
+            label = _FLUFF_ADDR_PREFIX_RE.sub("", label).strip()
+            if len(label) > 40:
+                bits = label.split()
+                label = " ".join(bits[-2:]) if len(bits) >= 2 else label
+        if label and not label.lower().startswith("apartment"):
+            out = f"{label}: {street}"
+        else:
+            out = street
+        if citystate:
+            out = f"{out}, {citystate}"
+        return out
+
+    cleaned = _INCOMPLETE_ADDR_TAIL_RE.sub("", text).strip(" .,;")
+    cleaned = _FLUFF_ADDR_PREFIX_RE.sub("", cleaned).strip(" .,;")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if cleaned.endswith((" the", " The", " is", " at")):
+        cleaned = cleaned.rsplit(" ", 1)[0].strip(" .,;")
+    return cleaned or None
 
 
 def _infer_move_time(text: str) -> Optional[str]:
@@ -164,26 +200,47 @@ def _infer_move_time(text: str) -> Optional[str]:
 
 
 def _infer_access_notes(text: str) -> Optional[str]:
-    """Build access notes only from phrases present in the email."""
+    """Build compact access notes only from phrases present in the email."""
     parts: list[str] = []
-    floor = _FLOOR_ACCESS_RE.search(text or "")
-    if floor:
-        parts.append(re.sub(r"\s+", " ", floor.group(1)).strip(" ,.;"))
-    for rx in (_ELEVATOR_RE, _WALK_RE, _HAND_TRUCK_RE):
-        m = rx.search(text or "")
-        if not m:
-            continue
-        bit = re.sub(r"\s+", " ", m.group(1)).strip(" ,.;")
-        if bit and not any(bit.lower() in p.lower() for p in parts):
-            parts.append(bit)
+    raw = text or ""
+
+    floor_m = re.search(r"(\d+(?:st|nd|rd|th)?\s+floor)", raw, re.IGNORECASE)
+    if floor_m:
+        parts.append(floor_m.group(1))
+
+    if re.search(r"loading\s+dock", raw, re.I) and re.search(r"elevator", raw, re.I):
+        parts.append("loading dock beside elevator")
+    elif re.search(r"\bno\s+elevator\b", raw, re.I):
+        parts.append("no elevator")
+    elif re.search(r"\belevator\b", raw, re.I):
+        parts.append("elevator")
+
+    walk = _WALK_RE.search(raw)
+    if walk:
+        bit = re.sub(r"\s+", " ", walk.group(1)).strip(" ,.;")
+        bit = re.sub(r"^(?:about\s+a\s+|about\s+)", "", bit, flags=re.I)
+        parts.append(bit)
+
+    if re.search(r"luggage\s+cart", raw, re.I):
+        parts.append("complex luggage cart for small items")
+
+    if _HAND_TRUCK_RE.search(raw):
+        if re.search(r"u-?haul", raw, re.I):
+            parts.append("U-Haul hand truck available")
+        else:
+            parts.append("hand truck available")
+
     if not parts:
         return None
+    seen: set[str] = set()
     cleaned: list[str] = []
     for p in parts:
-        if cleaned and p.lower() in cleaned[-1].lower():
+        key = p.lower()
+        if key in seen:
             continue
+        seen.add(key)
         cleaned.append(p)
-    return "; ".join(cleaned[:4])
+    return "; ".join(cleaned[:5])
 
 
 def _notes_look_hallucinated(notes: Optional[str], raw: str) -> bool:
@@ -205,6 +262,15 @@ def _notes_look_hallucinated(notes: Optional[str], raw: str) -> bool:
     if "no elevator" in notes_l and "no elevator" not in raw_l and "without elevator" not in raw_l:
         return True
     return False
+
+
+def _notes_are_bloated(notes: Optional[str]) -> bool:
+    if not notes:
+        return False
+    if len(notes) > 180:
+        return True
+    floors = re.findall(r"\d+(?:st|nd|rd|th)?\s+floor", notes, flags=re.I)
+    return len(floors) >= 2
 
 
 def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> ExtractedJob:
@@ -292,29 +358,44 @@ def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> Extract
                 data["unpacking"] = "N"
 
     if unload_only:
-        if not data.get("service_requested"):
+        if not data.get("service_requested") or (data.get("service_requested") or "").lower() in {
+            "unloading",
+            "unload",
+        }:
             data["service_requested"] = "unload only"
-        # Prefer unload address from email; clear load for unload-only jobs
-        m = _UNLOAD_AT_RE.search(raw)
-        if m:
-            addr = re.sub(r"\s+", " ", m.group(1)).strip(" .,;")
-            # Stop at common trailing clauses
-            addr = re.split(r"\b(?:on|at|with|preferred|inventory|items)\b", addr, maxsplit=1, flags=re.I)[0].strip(" .,;")
-            if len(addr) >= 10:
-                data["unload_address"] = addr
+        cleaned_unload = _clean_address(data.get("unload_address"), raw) or _clean_address(
+            None, raw
+        )
+        if cleaned_unload:
+            data["unload_address"] = cleaned_unload
         load = data.get("load_address")
         unload = data.get("unload_address")
         if load and unload and _normalize_addr(load) == _normalize_addr(unload):
             data["load_address"] = None
         elif load and not unload:
-            data["unload_address"] = load
+            data["unload_address"] = _clean_address(load, raw) or load
             data["load_address"] = None
         else:
             data["load_address"] = None
     elif load_only:
-        if not data.get("service_requested"):
+        if not data.get("service_requested") or (data.get("service_requested") or "").lower() in {
+            "loading",
+            "load",
+        }:
             data["service_requested"] = "load only"
+        cleaned_load = _clean_address(data.get("load_address"), raw)
+        if cleaned_load:
+            data["load_address"] = cleaned_load
         data["unload_address"] = None
+    else:
+        if data.get("unload_address"):
+            data["unload_address"] = _clean_address(data.get("unload_address"), raw) or data.get(
+                "unload_address"
+            )
+        if data.get("load_address"):
+            data["load_address"] = _clean_address(data.get("load_address"), raw) or data.get(
+                "load_address"
+            )
 
     if _PACK_YES_RE.search(blob):
         data["packing"] = "Y"
@@ -335,15 +416,22 @@ def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> Extract
     if access and (
         not data.get("special_notes")
         or _notes_look_hallucinated(data.get("special_notes"), raw)
+        or _notes_are_bloated(data.get("special_notes"))
     ):
         data["special_notes"] = access
     elif access and data.get("special_notes"):
-        # Merge missing walk/elevator bits from email without inventing floors
         notes = data["special_notes"]
         for bit in access.split("; "):
             if bit and bit.lower() not in notes.lower():
                 notes = f"{notes}; {bit}"
         data["special_notes"] = notes
+
+    # Prefer early-arrival detail in Time when email has it
+    if data.get("move_time") and raw:
+        early = _EARLY_AS_RE.search(raw)
+        mt = data["move_time"]
+        if early and early.group(1).lower() not in mt.lower() and "early" not in mt.lower():
+            data["move_time"] = f"{mt} (as early as {early.group(1)})"
 
     promises = list(data.get("promises_made") or [])
     cleaned = []
