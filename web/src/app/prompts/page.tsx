@@ -180,21 +180,24 @@ function PromptsForm() {
             </div>
             <ol className="list-decimal space-y-1 pl-4">
               <li>
-                <strong className="text-slate-800">Classify</strong> — yes/no moving inquiry
+                <strong className="text-slate-800">Classify</strong> — booked / inquiry / ignore /
+                unclear
               </li>
               <li>
-                <strong className="text-slate-800">Extract</strong> — date, movers, truck, addresses
+                <strong className="text-slate-800">Extract</strong> — full job categories (booked +
+                inquiry)
               </li>
               <li>
-                <strong className="text-slate-800">Reply</strong> — fill template → Gmail draft (not AI-written)
+                <strong className="text-slate-800">Reply</strong> — stock/template draft for{" "}
+                <em>inquiries only</em> (booked jobs are extract-only)
               </li>
             </ol>
           </div>
 
           <section className="card space-y-6">
             <PromptEditor
-              label="1. Classify prompt (yes / no)"
-              description="Ask whether the email is a moving inquiry. Keep {email} so the message is included."
+              label="1. Classify prompt (booked / inquiry / ignore / unclear)"
+              description="Return email_type. Keep {email}. Booked = already paid/scheduled (Moving Helper). Unclear escalates to Needs-Human."
               placeholders={placeholders.classify}
               value={classifyPrompt}
               onChange={setClassifyPrompt}

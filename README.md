@@ -1,20 +1,25 @@
 # Email Agent
 
-Self-hosted AI email agent for moving companies: reads full Gmail threads, extracts structured job data with a local LLM (Ollama/Qwen), pulls pricing from Google Sheets, generates rule-based replies, and logs everything.
+Self-hosted AI email agent for moving companies: reads full Gmail threads, classifies booked vs inquiry, extracts structured job data with a local LLM (Ollama/Qwen), pulls pricing + stock replies from Google Sheets, drafts replies for inquiries only, labels mail in Gmail, and logs everything.
 
 **No Docker** — runs as a Python app on your VPS with systemd.
 
 ## Features
 
 - Full Gmail thread read via Gmail API (not snippets)
-- Structured extraction: name, phone, addresses, inventory, requests, promises, summary
-- Live pricing from Google Sheet (day of week, movers, truck type)
-- Stock/custom replies from `config/rules.yaml`
-- Gmail drafts by default (`REPLY_MODE=draft`) or auto-send
-- Message log dashboard at `/dashboard`
-- Scheduled job reminders (2-day / 1-day) from Sheet `Jobs` tab
-- Lead follow-up if no reply (mark thread with API)
-- Background polling via APScheduler
+- Classify: **booked** / **inquiry** / **unclear** / **ignore**
+- Booked jobs (Moving Helper etc.): **extract only** — no sales draft
+- Structured extraction into your job categories (title + booking entry + Y/N + pricing)
+- Live pricing from Google Sheet (`Pricing` tab)
+- Stock replies from Google Sheet (`StockResponses` tab) with keyword triggers
+- Gmail drafts for inquiries (`REPLY_MODE=draft`) — never auto-send unless you set send
+- Gmail labels: `Agent/Drafted`, `Agent/Extracted`, `Agent/Needs-Human`, `Agent/Ignored`
+- Safety: only Drafted is marked read; Needs-Human / Ignored / Extracted stay unread
+- Writes rows to `ExtractedJobs` sheet tab (copyable title + booking blocks)
+- Confirmation emails 3 days + 1 day before (from `Jobs` tab)
+- Lead follow-up if no reply (awaiting_reply after draft)
+- Web dashboard: message log, job fields, send button, Connect Gmail
+- Admin guide: [docs/admin-guide.md](docs/admin-guide.md)
 
 ## Quick start (development)
 
@@ -29,26 +34,36 @@ Open http://localhost:8000/dashboard → **Connect Gmail**.
 
 ## Google Cloud setup
 
-1. Create a project at [Google Cloud Console](https://console.cloud.google.com)
+1. Create a project at [Google Cloud Console](https://console.google.com)
 2. Enable **Gmail API**, **Google Sheets API**, **Google Calendar API**
 3. Create OAuth 2.0 credentials (Web application)
 4. Authorized redirect URI: `http://YOUR_HOST:8000/auth/google/callback`
 5. Copy Client ID and Secret into `.env`
 
-## Pricing sheet format
+Scopes used: Gmail modify/send, Sheets read/write, Calendar readonly.
 
-**Tab `Pricing`** (header row):
+## Sheet tabs
+
+**`Pricing`**
 
 | day_of_week | num_movers | truck_type | price |
 |-------------|------------|------------|-------|
 | monday      | 2          | 16ft       | 450   |
 
-**Tab `Jobs`** (for confirmation reminders):
+**`StockResponses`** (optional)
+
+| trigger | body |
+|---------|------|
+| insurance | Hi {customer_name}, … |
+
+**`Jobs`** (confirmations)
 
 | job_id | customer_email | customer_name | move_date | description | load_address |
 |--------|----------------|---------------|-----------|-------------|--------------|
 
-Share the sheet with the Google account you connect, or use a service account (`GOOGLE_SERVICE_ACCOUNT_FILE`).
+**`ExtractedJobs`** — auto-created; agent appends extracted jobs.
+
+Share the sheet with the Google account you connect.
 
 ## API endpoints
 
@@ -61,35 +76,32 @@ Share the sheet with the Google account you connect, or use a service account (`
 
 ## VPS production (no Docker)
 
-See [docs/setup.md](docs/setup.md).
+See [docs/setup.md](docs/setup.md). Operator guide: [docs/admin-guide.md](docs/admin-guide.md).
 
 ## Configuration
 
 Copy `.env.example` to `.env`. Key variables:
 
-- `OLLAMA_MODEL` — default `qwen2.5:7b-instruct`
+- `OLLAMA_MODEL` — default `qwen2.5:3b-instruct`
 - `REPLY_MODE` — `draft` (recommended) or `send`
 - `FOLLOWUP_WAIT_DAYS` / `FOLLOWUP_MAX_ATTEMPTS`
-- `REMINDER_DAYS` — e.g. `2,1`
+- `REMINDER_DAYS` — default `3,1`
 
 ## Project structure
 
 ```
 app/
   auth/         Google OAuth
-  gmail/        Thread read, drafts, send
-  extraction/   Ollama + Pydantic schema
-  pricing/      Sheets + quote logic
-  replies/      YAML rules + templates
+  gmail/        Thread read, drafts, send, labels
+  extraction/   Classify + schema + Ollama
+  pricing/      Sheets pricing, stock, ExtractedJobs write
+  replies/      Templates + stock matching
   scheduler/    Poll, reminders, follow-ups
-  dashboard/    Message log UI
+  services/     Pipeline
 config/
-  rules.yaml    Reply templates
-scripts/
-  install.sh    One-time setup
-  email-agent.service
+  rules.yaml    Fallback reply templates
+docs/
+  setup.md
+  admin-guide.md
+web/            Next.js dashboard
 ```
-
-## License
-
-Proprietary — delivered to client with full source ownership per project agreement.

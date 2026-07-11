@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     followup_wait_days: int = 3
     followup_max_attempts: int = 2
 
-    reminder_days: str = "2,1"
+    reminder_days: str = "3,1"
 
     rules_file: str = "config/rules.yaml"
 

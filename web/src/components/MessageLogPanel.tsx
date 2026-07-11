@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ExternalLink, Send } from "lucide-react";
 import clsx from "clsx";
 import { MessageLog } from "@/lib/api";
+import { JobFieldsPanel } from "@/components/JobFieldsPanel";
 
 const PAGE_SIZE = 15;
 
@@ -16,6 +17,8 @@ function directionBadge(direction: string) {
     discarded: "bg-slate-100 text-slate-500 ring-slate-500/10",
     reminder: "bg-purple-50 text-purple-700 ring-purple-600/20",
     followup: "bg-orange-50 text-orange-700 ring-orange-600/20",
+    extracted: "bg-teal-50 text-teal-700 ring-teal-600/20",
+    needs_human: "bg-rose-50 text-rose-700 ring-rose-600/20",
   };
   return styles[direction] || "bg-slate-100 text-slate-600 ring-slate-500/10";
 }
@@ -24,6 +27,8 @@ function directionLabel(direction: string) {
   if (direction === "ignored") return "skipped";
   if (direction === "outbound") return "sent";
   if (direction === "monitored") return "logged";
+  if (direction === "extracted") return "extracted";
+  if (direction === "needs_human") return "needs human";
   return direction;
 }
 
@@ -33,6 +38,8 @@ function statusMeta(log: MessageLog) {
   if (log.direction === "monitored") return { label: "Monitor only", className: "text-amber-600" };
   if (log.direction === "discarded") return { label: "Deleted", className: "text-slate-500" };
   if (log.direction === "draft") return { label: "Draft", className: "text-blue-600" };
+  if (log.direction === "extracted") return { label: "Booked job", className: "text-teal-700" };
+  if (log.direction === "needs_human") return { label: "Needs you", className: "text-rose-700" };
   return { label: log.direction, className: "text-slate-500" };
 }
 
@@ -41,6 +48,8 @@ function replySectionTitle(direction: string) {
   if (direction === "monitored") return "Note";
   if (direction === "outbound") return "Sent reply";
   if (direction === "draft") return "Draft reply";
+  if (direction === "extracted") return "Note";
+  if (direction === "needs_human") return "Why flagged";
   return "Reply";
 }
 
@@ -100,12 +109,19 @@ export function MessageLogPanel({ logs, onSend, sendingId }: Props) {
         const open = expanded === log.id;
         const status = statusMeta(log);
         const isSkipped = log.direction === "ignored" || log.direction === "monitored";
+        const showJobFields =
+          !!log.extraction_json &&
+          (log.direction === "extracted" ||
+            log.direction === "draft" ||
+            log.direction === "outbound");
         return (
           <div
             key={log.id}
             className={clsx(
               "overflow-hidden rounded-lg border border-surface-border bg-white",
-              isSkipped && "bg-slate-50/90"
+              isSkipped && "bg-slate-50/90",
+              log.direction === "needs_human" && "border-rose-200 bg-rose-50/30",
+              log.direction === "extracted" && "border-teal-200 bg-teal-50/20"
             )}
           >
             <button
@@ -154,23 +170,36 @@ export function MessageLogPanel({ logs, onSend, sendingId }: Props) {
                     </pre>
                   </div>
                   <div>
-                    <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      AI summary
-                    </h4>
-                    <div
-                      className={clsx(
-                        "rounded-md border p-2.5 text-xs",
-                        isSkipped
-                          ? "border-slate-200 bg-slate-100 text-slate-600"
-                          : "border-brand-200 bg-brand-50/50 text-slate-800"
-                      )}
-                    >
-                      {log.direction === "ignored"
-                        ? "Not extracted — skipped (not a moving inquiry)."
-                        : log.direction === "monitored"
-                          ? "AI is off — email was logged only."
-                          : log.summary || "No AI summary available."}
-                    </div>
+                    {showJobFields ? (
+                      <JobFieldsPanel
+                        extractionJson={log.extraction_json}
+                        summaryFallback={log.summary}
+                      />
+                    ) : (
+                      <>
+                        <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Status
+                        </h4>
+                        <div
+                          className={clsx(
+                            "rounded-md border p-2.5 text-xs",
+                            isSkipped
+                              ? "border-slate-200 bg-slate-100 text-slate-600"
+                              : log.direction === "needs_human"
+                                ? "border-rose-200 bg-rose-50 text-rose-900"
+                                : "border-brand-200 bg-brand-50/50 text-slate-800"
+                          )}
+                        >
+                          {log.direction === "ignored"
+                            ? "Not extracted — skipped (not a moving inquiry)."
+                            : log.direction === "monitored"
+                              ? "AI is off — email was logged only."
+                              : log.direction === "needs_human"
+                                ? "Flagged for human — left unread in Gmail."
+                                : log.summary || "No AI summary available."}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -182,7 +211,9 @@ export function MessageLogPanel({ logs, onSend, sendingId }: Props) {
                     <pre
                       className={clsx(
                         "max-h-40 overflow-auto rounded-md border p-2.5 text-xs whitespace-pre-wrap",
-                        isSkipped
+                        isSkipped ||
+                          log.direction === "extracted" ||
+                          log.direction === "needs_human"
                           ? "border-slate-200 bg-slate-100 text-slate-600"
                           : "border-surface-border bg-white text-slate-700"
                       )}

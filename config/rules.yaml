@@ -59,12 +59,12 @@ templates:
   confirmation: |
     Hi {customer_name},
 
-    This confirms your move on {move_date}.
+    This confirms your move on {move_date} ({days_before} day(s) away).
 
     Load: {load_address}
-    Unload: {unload_address}
+    Details: {description}
 
-    We look forward to helping you!
+    Reply if anything changed — we look forward to helping you!
 
     Best regards,
     Your Moving Team

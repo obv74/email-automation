@@ -138,9 +138,14 @@ def mark_tenant_polled(db: Session, tenant: Tenant) -> None:
 
 
 def list_pollable_tenants(db: Session) -> list[Tenant]:
+    """Only active tenants with Gmail connected and AI enabled."""
     return (
         db.query(Tenant)
-        .filter(Tenant.is_active.is_(True), Tenant.gmail_connected.is_(True))
+        .filter(
+            Tenant.is_active.is_(True),
+            Tenant.gmail_connected.is_(True),
+            Tenant.ai_enabled.is_(True),
+        )
         .order_by(Tenant.name)
         .all()
     )

@@ -103,7 +103,8 @@ class MessageLog(Base):
     gmail_thread_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     gmail_message_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     gmail_draft_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    direction: Mapped[str] = mapped_column(String(16))  # inbound | outbound | draft | reminder | followup | ignored
+    # inbound | outbound | draft | reminder | followup | ignored | extracted | needs_human | monitored
+    direction: Mapped[str] = mapped_column(String(16))
     subject: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     inbound_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     extraction_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

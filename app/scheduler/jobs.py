@@ -162,14 +162,29 @@ def run_reminder_check(tenant_id: str) -> None:
                 if sent:
                     continue
 
-                subject = f"Move reminder — {days_before} day(s) out"
-                body = (
-                    f"Hi {job.customer_name or 'there'},\n\n"
-                    f"This is a reminder that your move is scheduled for {job.move_date}.\n"
-                    f"Load address: {job.load_address or 'See prior confirmation'}\n"
-                    f"Details: {job.job_description or 'N/A'}\n\n"
-                    f"Reply if anything changed.\n\nThank you!"
-                )
+                subject, body = None, None
+                try:
+                    from app.replies.generate import render_confirmation
+
+                    tenant = get_tenant(db, tenant_id)
+                    subject, body = render_confirmation(
+                        job.customer_name,
+                        job.move_date,
+                        job.load_address,
+                        job.job_description,
+                        days_before,
+                        rules_file=tenant.rules_file if tenant else None,
+                    )
+                except Exception as exc:
+                    logger.warning("Confirmation template failed, using fallback: %s", exc)
+                    subject = f"Move confirmation — {days_before} day(s) out"
+                    body = (
+                        f"Hi {job.customer_name or 'there'},\n\n"
+                        f"This confirms your move scheduled for {job.move_date}.\n"
+                        f"Load address: {job.load_address or 'See prior confirmation'}\n"
+                        f"Details: {job.job_description or 'N/A'}\n\n"
+                        f"Reply if anything changed.\n\nThank you!"
+                    )
                 _send_email(db, tenant_id, job.customer_email, subject, body, "reminder")
                 db.add(
                     ReminderLog(

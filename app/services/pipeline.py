@@ -1,4 +1,4 @@
-"""Core pipeline: Gmail thread → extract → price → reply → log."""
+"""Core pipeline: Gmail thread → classify → extract → (optional) reply → log."""
 
 import json
 import logging
@@ -9,15 +9,23 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import MessageLog, ProcessedThread
-from app.tenants.service import get_tenant, tenant_reply_mode
 from app.extraction.enrich import enrich_job_for_pricing
-from app.extraction.llm import extract_job_from_thread, is_moving_inquiry
+from app.extraction.llm import classify_email, extract_job_from_thread
+from app.extraction.schema import ExtractedJob
 from app.gmail.client import get_gmail_service
 from app.gmail.drafts import create_draft, send_message
-from app.gmail.threads import fetch_full_thread, list_recent_thread_ids, mark_thread_as_read
+from app.gmail.labels import (
+    LABEL_DRAFTED,
+    LABEL_EXTRACTED,
+    LABEL_IGNORED,
+    LABEL_NEEDS_HUMAN,
+    apply_agent_label,
+)
+from app.gmail.threads import fetch_full_thread, list_recent_thread_ids
 from app.pricing.quote import compute_quote, quote_failure_reason
-from app.pricing.sheets import fetch_pricing_rows
+from app.pricing.sheets import append_extracted_job, fetch_pricing_rows, fetch_stock_responses
 from app.replies.generate import generate_reply
+from app.tenants.service import get_tenant, tenant_reply_mode
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +43,7 @@ def _should_skip_thread(
         return None
     if existing.last_message_id != latest_message_id:
         return None  # new reply in thread — reprocess
-    if existing.status in ("processed", "ignored", "monitored"):
+    if existing.status in ("processed", "ignored", "monitored", "extracted", "needs_human", "awaiting_reply"):
         return f"already {existing.status}"
     if existing.status == "processing":
         age = datetime.utcnow() - existing.processed_at
@@ -71,23 +79,21 @@ def _claim_thread(db: Session, tenant_id: str, thread_id: str, message_id: str) 
     return row
 
 
-def _release_thread_claim(db: Session, row: ProcessedThread, success: bool) -> None:
+def _release_thread_claim(db: Session, row: ProcessedThread, success: bool, status: str = "processed") -> None:
     if success:
-        row.status = "processed"
+        row.status = status
         row.processed_at = datetime.utcnow()
     else:
         row.status = "failed"
     db.commit()
 
 
-def _mark_ignored(
+def _upsert_processed(
     db: Session,
     tenant_id: str,
     thread_id: str,
     message_id: str,
-    subject: str,
-    reason: str,
-    inbound_body: str = "",
+    status: str,
 ) -> None:
     existing = (
         db.query(ProcessedThread)
@@ -99,7 +105,7 @@ def _mark_ignored(
     )
     if existing:
         existing.last_message_id = message_id
-        existing.status = "ignored"
+        existing.status = status
         existing.processed_at = datetime.utcnow()
     else:
         db.add(
@@ -107,9 +113,21 @@ def _mark_ignored(
                 tenant_id=tenant_id,
                 gmail_thread_id=thread_id,
                 last_message_id=message_id,
-                status="ignored",
+                status=status,
             )
         )
+
+
+def _mark_ignored(
+    db: Session,
+    tenant_id: str,
+    thread_id: str,
+    message_id: str,
+    subject: str,
+    reason: str,
+    inbound_body: str = "",
+) -> None:
+    _upsert_processed(db, tenant_id, thread_id, message_id, "ignored")
     db.add(
         MessageLog(
             tenant_id=tenant_id,
@@ -123,44 +141,24 @@ def _mark_ignored(
     db.commit()
 
 
-def _mark_monitored(
+def _mark_needs_human(
     db: Session,
     tenant_id: str,
     thread_id: str,
     message_id: str,
     subject: str,
+    reason: str,
     inbound_body: str = "",
 ) -> None:
-    """AI off: record the email without classify/extract/draft."""
-    existing = (
-        db.query(ProcessedThread)
-        .filter(
-            ProcessedThread.tenant_id == tenant_id,
-            ProcessedThread.gmail_thread_id == thread_id,
-        )
-        .first()
-    )
-    if existing:
-        existing.last_message_id = message_id
-        existing.status = "monitored"
-        existing.processed_at = datetime.utcnow()
-    else:
-        db.add(
-            ProcessedThread(
-                tenant_id=tenant_id,
-                gmail_thread_id=thread_id,
-                last_message_id=message_id,
-                status="monitored",
-            )
-        )
+    _upsert_processed(db, tenant_id, thread_id, message_id, "needs_human")
     db.add(
         MessageLog(
             tenant_id=tenant_id,
             gmail_thread_id=thread_id,
-            direction="monitored",
+            direction="needs_human",
             subject=subject,
             inbound_body=inbound_body[:8000] if inbound_body else None,
-            reply_body="AI processing is off — email logged only.",
+            reply_body=reason,
         )
     )
     db.commit()
@@ -188,31 +186,45 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
     tenant_row = get_tenant(db, tenant_id)
     ai_on = True if not tenant_row or tenant_row.ai_enabled is None else bool(tenant_row.ai_enabled)
 
-    # AI off: only monitor — log the email, no classify / extract / draft
+    # AI off: do not touch Gmail (no read, no draft). Caller should also skip polling.
     if not ai_on and not force:
-        _mark_monitored(db, tenant_id, thread_id, latest.message_id, latest.subject, latest.body)
-        try:
-            mark_thread_as_read(gmail, thread_id)
-        except Exception as exc:
-            logger.warning("Could not mark thread read %s: %s", thread_id, exc)
-        return {"status": "monitored", "thread_id": thread_id}
+        return {"status": "ai_off", "thread_id": thread_id}
 
-    is_job, classify_reason = await is_moving_inquiry(
+    email_type, classify_reason = await classify_email(
         conversation,
         prompt_template=tenant_row.classify_prompt if tenant_row else None,
     )
-    if not is_job and not force:
+
+    # ignore — leave unread so nothing silently disappears
+    if email_type == "ignore" and not force:
         _mark_ignored(
             db, tenant_id, thread_id, latest.message_id, latest.subject, classify_reason, latest.body
         )
-        try:
-            mark_thread_as_read(gmail, thread_id)
-        except Exception as exc:
-            logger.warning("Could not mark thread read %s: %s", thread_id, exc)
+        apply_agent_label(gmail, thread_id, LABEL_IGNORED, mark_read=False)
         return {
             "status": "ignored",
             "thread_id": thread_id,
             "reason": classify_reason,
+            "marked_read": False,
+        }
+
+    # unclear — escalate, leave unread, never draft
+    if email_type == "unclear" and not force:
+        _mark_needs_human(
+            db,
+            tenant_id,
+            thread_id,
+            latest.message_id,
+            latest.subject,
+            f"Unclear — needs human. {classify_reason}",
+            latest.body,
+        )
+        apply_agent_label(gmail, thread_id, LABEL_NEEDS_HUMAN, mark_read=False)
+        return {
+            "status": "needs_human",
+            "thread_id": thread_id,
+            "reason": classify_reason,
+            "marked_read": False,
         }
 
     claim = _claim_thread(db, tenant_id, thread_id, latest.message_id)
@@ -224,11 +236,48 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
             user_prompt_template=tenant_row.extraction_user_prompt if tenant_row else None,
         )
         job = enrich_job_for_pricing(job, conversation)
+        if email_type == "booked" and not job.booking_source:
+            data = job.model_dump()
+            data["booking_source"] = "Moving Helper"
+            job = ExtractedJob.model_validate(data)
+
+        # BOOKED: extract only — never draft a sales reply
+        if email_type == "booked":
+            append_extracted_job(
+                db,
+                tenant_id,
+                job,
+                gmail_thread_id=thread_id,
+                email_type="booked",
+            )
+            log = MessageLog(
+                tenant_id=tenant_id,
+                gmail_thread_id=thread_id,
+                direction="extracted",
+                subject=latest.subject,
+                inbound_body=latest.body[:8000] if latest.body else None,
+                extraction_json=json.dumps(job.model_dump()),
+                reply_body=f"Booked job — extract only. {classify_reason}",
+                rule_name="booked_extract",
+            )
+            db.add(log)
+            _release_thread_claim(db, claim, success=True, status="extracted")
+            apply_agent_label(gmail, thread_id, LABEL_EXTRACTED, mark_read=False)
+            return {
+                "status": "extracted",
+                "thread_id": thread_id,
+                "email_type": "booked",
+                "extraction": job.model_dump(),
+                "marked_read": False,
+            }
+
+        # INQUIRY: price + stock/YAML reply draft
         try:
             pricing_rows = fetch_pricing_rows(db, tenant_id)
         except Exception as exc:
             logger.exception("Sheet pricing fetch failed for %s: %s", tenant_id, exc)
             pricing_rows = []
+        stock_rows = fetch_stock_responses(db, tenant_id)
         quote = compute_quote(job, pricing_rows)
         if not quote:
             logger.warning(
@@ -244,12 +293,17 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
             quote,
             rules_file=tenant_row.rules_file if tenant_row else None,
             reply_template=tenant_row.reply_template if tenant_row else None,
+            conversation=conversation,
+            stock_rows=stock_rows,
         )
 
         subject = latest.subject if latest.subject.lower().startswith("re:") else f"Re: {latest.subject}"
         to_email = job.customer_email or latest.from_email
 
         reply_mode = tenant_reply_mode(tenant_row) if tenant_row else get_settings().reply_mode
+        if reply_mode not in ("draft", "send"):
+            reply_mode = "draft"
+
         draft_id = None
         message_id = None
         direction = "draft"
@@ -262,6 +316,14 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
             draft = create_draft(gmail, to_email, subject, reply_body, thread_id)
             draft_id = draft.get("id")
             direction = "draft"
+
+        append_extracted_job(
+            db,
+            tenant_id,
+            job,
+            gmail_thread_id=thread_id,
+            email_type="inquiry",
+        )
 
         log = MessageLog(
             tenant_id=tenant_id,
@@ -277,22 +339,23 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
             rule_name=rule_name,
         )
         db.add(log)
-        _release_thread_claim(db, claim, success=True)
+        # Mark awaiting_reply so follow-up scheduler can resend if no answer
+        _release_thread_claim(db, claim, success=True, status="awaiting_reply")
 
-        try:
-            mark_thread_as_read(gmail, thread_id)
-        except Exception as exc:
-            logger.warning("Could not mark thread read %s: %s", thread_id, exc)
+        # Only drafted/sent inquiries get Agent/Drafted + marked read
+        apply_agent_label(gmail, thread_id, LABEL_DRAFTED, mark_read=True)
 
         return {
             "status": "ok",
             "thread_id": thread_id,
+            "email_type": "inquiry",
             "extraction": job.model_dump(),
             "quote": quote,
             "rule": rule_name,
             "direction": direction,
             "draft_id": draft_id,
             "message_id": message_id,
+            "marked_read": True,
         }
     except Exception:
         _release_thread_claim(db, claim, success=False)
@@ -314,6 +377,10 @@ async def poll_all_tenants(db: Session) -> dict[str, list[dict]]:
 
 async def poll_unread_threads(db: Session, tenant_id: str) -> list[dict]:
     from app.tenants.service import get_tenant, mark_tenant_polled
+
+    tenant = get_tenant(db, tenant_id)
+    if tenant is not None and tenant.ai_enabled is False:
+        return [{"status": "ai_off", "reason": "AI disabled — inbox not touched"}]
 
     gmail = get_gmail_service(db, tenant_id)
     thread_ids = list_recent_thread_ids(gmail, query="is:unread in:inbox", max_results=10)

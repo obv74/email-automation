@@ -154,9 +154,10 @@ function SettingsForm() {
               <div>
                 <h2 className="font-semibold text-slate-900">AI summarize & reply</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  On: classify, extract, quote, and draft replies.
+                  On: classify emails (booked / inquiry / ignore), extract job fields, draft replies
+                  for inquiries only.
                   <br />
-                  Off: only monitor Gmail and log new emails.
+                  Off: inbox is not touched at all (no read, no drafts, no logging).
                 </p>
                 <Link
                   href="/prompts"
@@ -186,6 +187,11 @@ function SettingsForm() {
 
           <section className="card space-y-4">
             <h2 className="font-semibold text-slate-900">Pricing sheet</h2>
+            <p className="text-sm text-slate-500">
+              Google Sheet ID with tabs: <code className="text-xs">Pricing</code>, optional{" "}
+              <code className="text-xs">StockResponses</code>, <code className="text-xs">Jobs</code>.
+              The agent auto-creates <code className="text-xs">ExtractedJobs</code> for summaries.
+            </p>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700">Google Sheet ID</label>
               <input

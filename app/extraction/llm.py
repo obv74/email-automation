@@ -8,6 +8,7 @@ import httpx
 from pydantic import ValidationError
 
 from app.config import get_settings
+from app.extraction.classify import EmailType, heuristic_booked, normalize_email_type
 from app.extraction.prompt import build_extraction_prompt, build_retry_prompt
 from app.extraction.schema import ExtractedJob
 from app.prompts.defaults import CLASSIFY_PROMPT, CLASSIFY_SYSTEM, EXTRACTION_SYSTEM
@@ -54,15 +55,21 @@ async def extract_job_from_thread(
     raise OllamaError(f"Failed to extract valid job JSON after retries: {last_error}")
 
 
-async def is_moving_inquiry(
+async def classify_email(
     conversation: str,
     *,
     prompt_template: Optional[str] = None,
-) -> tuple[bool, str]:
-    """Fast Ollama check: is this thread a moving-company customer inquiry?"""
+) -> tuple[EmailType, str]:
+    """
+    Classify thread as booked | inquiry | ignore | unclear.
+    Heuristic booked markers win over the model (Moving Helper etc.).
+    """
+    if heuristic_booked(conversation):
+        return "booked", "matched booked-job keywords (Moving Helper / payment code / JB-)"
+
     settings = get_settings()
     if not settings.classify_enabled:
-        return True, "classification disabled"
+        return "inquiry", "classification disabled"
 
     snippet = conversation[: settings.classify_max_chars]
     template = (prompt_template or CLASSIFY_PROMPT).strip() or CLASSIFY_PROMPT
@@ -75,14 +82,33 @@ async def is_moving_inquiry(
         raw = await _call_ollama(
             prompt,
             system=CLASSIFY_SYSTEM,
-            num_predict=80,
+            num_predict=100,
             use_json_format=True,
         )
         data = _parse_json_response(raw)
-        return bool(data.get("is_moving_inquiry")), str(data.get("reason", ""))
+        # Back-compat if an old custom prompt still returns is_moving_inquiry
+        if "email_type" in data:
+            email_type = normalize_email_type(data.get("email_type"))
+        elif "is_moving_inquiry" in data:
+            email_type = "inquiry" if data.get("is_moving_inquiry") else "ignore"
+        else:
+            email_type = "unclear"
+        return email_type, str(data.get("reason", ""))
     except Exception as exc:
-        logger.warning("Classification failed, treating as inquiry: %s", exc)
-        return True, "classification error — processed anyway"
+        logger.warning("Classification failed, treating as unclear: %s", exc)
+        return "unclear", "classification error — needs human"
+
+
+async def is_moving_inquiry(
+    conversation: str,
+    *,
+    prompt_template: Optional[str] = None,
+) -> tuple[bool, str]:
+    """Legacy helper — True for inquiry/booked, False for ignore."""
+    email_type, reason = await classify_email(conversation, prompt_template=prompt_template)
+    if email_type in ("inquiry", "booked", "unclear"):
+        return True, reason
+    return False, reason
 
 
 async def _call_ollama(
