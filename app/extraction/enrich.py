@@ -112,6 +112,10 @@ _ASSEMBLY_NO_RE = re.compile(
     r"okay\s+with\s+assembly\s+just\s+need\s+manpower|no\s+assembly|assembly\s+not\s+needed",
     re.IGNORECASE,
 )
+_FRAGILE_RE = re.compile(
+    r"\bfragile\b|\bchina\b|\bglassware\b|\bcrystal\b|\bantiques?\b",
+    re.IGNORECASE,
+)
 _PACK_YES_RE = re.compile(r"\b(?:need|want|require)s?\s+(?:full\s+)?packing\b|\bpack(?:ing)?\s+(?:service|help)\b", re.I)
 _UNPACK_YES_RE = re.compile(r"\b(?:need|want|require)s?\s+unpacking\b|\bunpack(?:ing)?\s+(?:service|help)\b", re.I)
 _TIME_WINDOW_RE = re.compile(
@@ -625,6 +629,12 @@ def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> Extract
         data["assembly"] = "N"
     elif _ASSEMBLY_YES_RE.search(blob):
         data["assembly"] = "Y"
+    elif (unload_only or load_only) and not data.get("assembly"):
+        # Labor-only U-Haul jobs rarely include assembly unless asked
+        data["assembly"] = "N"
+
+    if _FRAGILE_RE.search(blob) and not data.get("super_fragile"):
+        data["super_fragile"] = "Y"
 
     access = _infer_access_notes(raw)
     if access and (
