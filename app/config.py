@@ -27,8 +27,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:3b-instruct"
     ollama_read_timeout_seconds: int = 600
-    ollama_max_thread_chars: int = 8000
+    ollama_max_thread_chars: int = 4500
     ollama_num_predict: int = 512
+    # Extract-specific (smaller = faster on weak CPU; enrich fills the rest)
+    ollama_extract_num_predict: int = 280
+    ollama_extract_max_chars: int = 4500
 
     classify_enabled: bool = True
     classify_max_chars: int = 2500

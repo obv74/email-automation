@@ -20,23 +20,21 @@ CLASSIFY_SYSTEM = (
     "is clear. Prefer unclear over ignore when unsure. Never invent certainty."
 )
 
-EXTRACTION_SYSTEM = """You extract structured moving-job information from email threads.
-Return ONLY valid JSON matching the schema exactly. Every field must be present.
-Use null for unknown scalar fields and [] for empty lists.
-Do not invent prices, addresses, or Y/N answers — only extract what is explicitly stated or clearly implied.
-Distinguish customer_requests (what the customer wants) from promises_made (what the moving company promised).
-For truck_type use values like "15ft", "20ft", "26ft", or null if not mentioned.
-For Y/N fields use "Y", "N", or null.
-Set booking_source to "Moving Helper", "U-Haul", "direct", or null when clear.
-city_state should be like "Alexandria, VA" when known.
-special_notes = stairs, elevators, long walks, load-only/unload-only, pads, payment codes, etc.
-summary = 2–4 sentences covering the job for ops staff."""
+EXTRACTION_SYSTEM = """Extract moving-job fields as compact JSON. No markdown. No extra keys.
+Rules:
+1) Name: line like "First Last 1 pm unload…" → customer_name = First Last.
+2) Phone (###) ###-#### → customer_phone. email → customer_email.
+3) unload/load only: set load_address or unload_address correctly; other null.
+4) Inventory as short item list. special_notes = stairs/floor/elevator/walk/pads.
+5) promises_made = only what THIS company promised. Customer U-Haul gear → special_notes, not promises.
+6) truck_type like 15ft. U-Haul/Moving Helper with no crew size → num_movers=2.
+7) "2hrs minimum $159/hr" → minimum_hours=2, hourly_rate=$159/hr.
+8) summary = 1-2 short sentences. null if unknown. [] if no list items."""
 
-EXTRACTION_USER = """Extract moving job fields as JSON only. All keys required. Use null/[] if missing.
-
+EXTRACTION_USER = """Return JSON only for this email.
 {schema}
-
-Email:
+{example}
+NOW extract this email:
 ---
 {email}
 ---"""
@@ -66,7 +64,7 @@ Your Moving Team
 
 # Placeholders shown in the Settings UI help text
 CLASSIFY_PLACEHOLDERS = "{email}"
-EXTRACTION_PLACEHOLDERS = "{email}, {schema}"
+EXTRACTION_PLACEHOLDERS = "{email}, {schema}, {example}"
 REPLY_PLACEHOLDERS = (
     "{customer_name}, {summary}, {load_address}, {unload_address}, "
     "{move_date}, {move_time}, {inventory}, {customer_requests}, {quote}, "

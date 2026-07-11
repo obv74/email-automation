@@ -210,7 +210,7 @@ function PromptsForm() {
           <section className="card space-y-6">
             <PromptEditor
               label="2a. Extract — system instructions"
-              description="How the model should behave when reading the email."
+              description="Keep this short — long system prompts slow CPU Ollama."
               placeholders="(no placeholders — plain instructions)"
               value={extractionSystem}
               onChange={setExtractionSystem}
@@ -220,11 +220,11 @@ function PromptsForm() {
             />
             <PromptEditor
               label="2b. Extract — user prompt"
-              description="The extraction request. Keep {email} and preferably {schema}."
+              description="Keep {schema}, {example}, and {email}. Short prompts = faster on weak VPS."
               placeholders={placeholders.extraction}
               value={extractionUser}
               onChange={setExtractionUser}
-              rows={8}
+              rows={10}
               disabled={!aiEnabled}
               isDefault={defaults?.extraction_user}
             />

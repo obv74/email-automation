@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from pydantic import ValidationError
@@ -29,6 +29,45 @@ def _parse_json_response(raw: str) -> dict:
     return json.loads(text)
 
 
+def _coerce_extracted(data: dict[str, Any]) -> ExtractedJob:
+    """Accept slim LLM JSON and fill defaults for fields not asked in the slim schema."""
+    defaults: dict[str, Any] = {
+        "customer_name": None,
+        "customer_phone": None,
+        "customer_email": None,
+        "city_state": None,
+        "load_address": None,
+        "unload_address": None,
+        "service_requested": None,
+        "move_date": None,
+        "move_time": None,
+        "inventory": [],
+        "heaviest_item": None,
+        "special_notes": None,
+        "customer_requests": [],
+        "promises_made": [],
+        "over_250_lbs": None,
+        "super_fragile": None,
+        "over_1000_value": None,
+        "packing": None,
+        "unpacking": None,
+        "assembly": None,
+        "disassembly": None,
+        "special_handling_notes": None,
+        "minimum_hours": None,
+        "minimum_price": None,
+        "hourly_rate": None,
+        "deposit": None,
+        "balance_due": None,
+        "num_movers": None,
+        "truck_type": None,
+        "booking_source": None,
+        "summary": "",
+    }
+    merged = {**defaults, **{k: v for k, v in data.items() if k in defaults}}
+    return ExtractedJob.model_validate(merged)
+
+
 async def extract_job_from_thread(
     conversation: str,
     *,
@@ -36,18 +75,24 @@ async def extract_job_from_thread(
     user_prompt_template: Optional[str] = None,
 ) -> ExtractedJob:
     settings = get_settings()
-    if len(conversation) > settings.ollama_max_thread_chars:
-        conversation = conversation[: settings.ollama_max_thread_chars] + "\n...[truncated]"
+    max_chars = settings.ollama_extract_max_chars
+    if len(conversation) > max_chars:
+        conversation = conversation[:max_chars] + "\n...[truncated]"
     prompt = build_extraction_prompt(conversation, user_prompt_template)
     system = (system_prompt or EXTRACTION_SYSTEM).strip() or EXTRACTION_SYSTEM
     last_error: Optional[str] = None
-
+    # Prefer 1 successful pass; retry once only if JSON invalid (saves time on CPU).
     for attempt in range(2):
         user_prompt = prompt if attempt == 0 else build_retry_prompt(conversation, last_error or "invalid JSON")
-        raw = await _call_ollama(user_prompt, system=system)
+        raw = await _call_ollama(
+            user_prompt,
+            system=system,
+            num_predict=settings.ollama_extract_num_predict,
+            temperature=0.0,
+        )
         try:
             data = _parse_json_response(raw)
-            return ExtractedJob.model_validate(data)
+            return _coerce_extracted(data)
         except (json.JSONDecodeError, ValidationError) as exc:
             last_error = str(exc)
             logger.warning("Extraction validation failed (attempt %s): %s", attempt + 1, exc)
@@ -82,11 +127,11 @@ async def classify_email(
         raw = await _call_ollama(
             prompt,
             system=CLASSIFY_SYSTEM,
-            num_predict=100,
+            num_predict=80,
+            temperature=0.0,
             use_json_format=True,
         )
         data = _parse_json_response(raw)
-        # Back-compat if an old custom prompt still returns is_moving_inquiry
         if "email_type" in data:
             email_type = normalize_email_type(data.get("email_type"))
         elif "is_moving_inquiry" in data:
@@ -116,6 +161,7 @@ async def _call_ollama(
     *,
     system: str = "You are a precise data extraction assistant.",
     num_predict: Optional[int] = None,
+    temperature: float = 0.0,
     use_json_format: bool = True,
 ) -> str:
     settings = get_settings()
@@ -129,7 +175,10 @@ async def _call_ollama(
         ],
         "options": {
             "num_predict": num_predict or settings.ollama_num_predict,
-            "temperature": 0.1,
+            "temperature": temperature,
+            # Slightly faster / more deterministic on small CPUs
+            "top_p": 0.9,
+            "repeat_penalty": 1.05,
         },
     }
     if use_json_format:
