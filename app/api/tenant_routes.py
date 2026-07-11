@@ -13,7 +13,7 @@ from app.auth.google_oauth import disconnect_gmail
 from app.db.models import MessageLog, ProcessedThread, User, get_db
 from app.gmail.client import get_gmail_service
 from app.gmail.drafts import send_draft, send_message
-from app.gmail.threads import fetch_full_thread, list_recent_thread_ids
+from app.gmail.threads import fetch_full_thread, list_recent_thread_ids, list_thread_previews
 from app.services.draft_sync import purge_logs_for_missing_threads, sync_draft_logs
 from app.services.pipeline import extract_chosen_thread, poll_unread_threads, process_thread
 from app.tenants.service import (
@@ -297,6 +297,23 @@ def api_disconnect_gmail(
     return {"status": "ok", "slug": tenant.slug, "gmail_connected": False}
 
 
+@router.get("/tenants/{tenant_slug}/threads/recent")
+def api_list_recent(
+    tenant_slug: str,
+    q: str = "in:inbox newer_than:30d",
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List recent inbox threads with real API ids — for manual Extract picker."""
+    tenant = require_tenant_access(db, user, tenant_slug)
+    try:
+        gmail = get_gmail_service(db, tenant.id)
+        previews = list_thread_previews(gmail, query=q, max_results=25)
+        return {"tenant": tenant.slug, "count": len(previews), "previews": previews}
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get("/tenants/{tenant_slug}/threads/unread")
 def api_list_unread(
     tenant_slug: str,
@@ -306,22 +323,13 @@ def api_list_unread(
     tenant = require_tenant_access(db, user, tenant_slug)
     try:
         gmail = get_gmail_service(db, tenant.id)
-        thread_ids = list_recent_thread_ids(gmail, query="is:unread in:inbox", max_results=10)
-        previews = []
-        for tid in thread_ids[:5]:
-            messages, _ = fetch_full_thread(gmail, tid)
-            latest = messages[-1] if messages else None
-            previews.append(
-                {
-                    "thread_id": tid,
-                    "subject": latest.subject if latest else "",
-                    "from": latest.from_email if latest else "",
-                    "snippet": (latest.body[:200] + "...")
-                    if latest and len(latest.body) > 200
-                    else (latest.body if latest else ""),
-                }
-            )
-        return {"tenant": tenant.slug, "count": len(thread_ids), "thread_ids": thread_ids, "previews": previews}
+        previews = list_thread_previews(gmail, query="is:unread in:inbox", max_results=25)
+        return {
+            "tenant": tenant.slug,
+            "count": len(previews),
+            "thread_ids": [p["thread_id"] for p in previews],
+            "previews": previews,
+        }
     except RuntimeError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -333,7 +341,7 @@ async def api_extract_chosen(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Extract job categories from ONE Gmail thread the user pasted. No auto-inbox scan."""
+    """Extract job categories from ONE Gmail thread the user chose. No auto-inbox scan."""
     tenant = require_tenant_access(db, user, tenant_slug)
     if not tenant.gmail_connected:
         raise HTTPException(400, "Connect Gmail first")

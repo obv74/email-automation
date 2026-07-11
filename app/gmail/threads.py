@@ -114,30 +114,94 @@ def format_conversation(messages: list[ParsedMessage]) -> str:
 
 def parse_gmail_thread_ref(ref: str) -> Optional[str]:
     """
-    Accept a raw Gmail thread id OR a Gmail URL and return the thread id.
-    Examples:
-      FMfcgzQ... 
-      https://mail.google.com/mail/u/0/#inbox/FMfcgzQ...
-      https://mail.google.com/mail/u/0/#all/18abc...
+    Accept a raw Gmail API thread id OR a Gmail URL and return the id string.
+    Note: modern Gmail web URLs use FMfcgz… sync ids that are NOT valid API ids.
+    Those must be chosen from the recent-mail picker instead.
     """
     if not ref:
         return None
     text = ref.strip()
-    # URL with #inbox/ID or #all/ID or #label/name/ID
     m = re.search(r"#(?:inbox|all|sent|starred|snoozed|important|search/[^/]+|label/[^/]+)/([a-zA-Z0-9]+)", text)
     if m:
         return m.group(1)
-    # /threads/ID style (rare)
     m = re.search(r"/threads/([a-zA-Z0-9]+)", text)
     if m:
         return m.group(1)
-    # Bare id (Gmail thread ids are alphanumeric, often start with F or hex-ish)
     if re.fullmatch(r"[a-zA-Z0-9]+", text) and len(text) >= 10:
         return text
     return None
 
 
+def is_gmail_web_sync_id(thread_id: str) -> bool:
+    """True for Gmail UI sync ids (FMfcgz…) that the API rejects."""
+    return bool(thread_id) and thread_id.startswith("FMfcgz")
+
+
+def list_thread_previews(
+    gmail,
+    query: str = "in:inbox",
+    max_results: int = 25,
+) -> list[dict]:
+    """
+    List recent threads with real API thread ids (safe for extract).
+    Uses metadata only — does not run AI.
+    """
+    response = (
+        gmail.users()
+        .threads()
+        .list(userId="me", q=query, maxResults=max_results)
+        .execute()
+    )
+    previews: list[dict] = []
+    for t in response.get("threads", []) or []:
+        tid = t["id"]
+        try:
+            meta = (
+                gmail.users()
+                .threads()
+                .get(
+                    userId="me",
+                    id=tid,
+                    format="metadata",
+                    metadataHeaders=["Subject", "From", "Date"],
+                )
+                .execute()
+            )
+            msgs = meta.get("messages") or []
+            latest = msgs[-1] if msgs else {}
+            headers = {
+                h["name"].lower(): h["value"]
+                for h in (latest.get("payload") or {}).get("headers") or []
+            }
+            previews.append(
+                {
+                    "thread_id": tid,
+                    "subject": headers.get("subject") or "(no subject)",
+                    "from": headers.get("from") or "",
+                    "date": headers.get("date") or "",
+                    "snippet": (t.get("snippet") or meta.get("snippet") or "")[:180],
+                }
+            )
+        except Exception as exc:
+            logger.warning("Could not load preview for thread %s: %s", tid, exc)
+            previews.append(
+                {
+                    "thread_id": tid,
+                    "subject": "(unavailable)",
+                    "from": "",
+                    "date": "",
+                    "snippet": "",
+                }
+            )
+    return previews
+
+
 def fetch_full_thread(gmail, thread_id: str) -> tuple[list[ParsedMessage], str]:
+    if is_gmail_web_sync_id(thread_id):
+        raise RuntimeError(
+            "That Gmail link uses a web-only id (FMfcgz…) which the Gmail API cannot open. "
+            "Use the dashboard list: click a recent email instead of pasting the browser URL."
+        )
     thread = gmail.users().threads().get(userId="me", id=thread_id, format="full").execute()
     raw_messages = thread.get("messages", [])
     parsed = [parse_message(m) for m in raw_messages]

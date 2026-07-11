@@ -58,6 +58,14 @@ export type MessageLog = {
   created_at: string;
 };
 
+export type ThreadPreview = {
+  thread_id: string;
+  subject: string;
+  from: string;
+  date?: string;
+  snippet: string;
+};
+
 export type UpdateCompanyBody = {
   name?: string;
   pricing_sheet_id?: string;
@@ -134,6 +142,13 @@ export const api = {
     request<{ status: string; thread_id?: string; extraction?: Record<string, unknown> }>(
       `/api/tenants/${slug}/extract`,
       { method: "POST", body: JSON.stringify({ thread_ref: threadRef }) },
+      token
+    ),
+
+  listRecentThreads: (token: string, slug: string) =>
+    request<{ count: number; previews: ThreadPreview[] }>(
+      `/api/tenants/${slug}/threads/recent`,
+      {},
       token
     ),
 
