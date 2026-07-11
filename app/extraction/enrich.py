@@ -19,10 +19,11 @@ _TRUCK_SIZE_RE = re.compile(
     r"\b(15|16|17|20|22|24|26)\s*(?:ft|foot|feet|'|’)\b",
     re.IGNORECASE,
 )
-# "Joshua Soberano 1 pm unload 15ft truck North Bethesda, MD (404) 450-7688 |"
+# "Joshua Soberano 1 pm unload..." / "Chris Walton 3:30-4 pm load..."
 _LEAD_NAME_RE = re.compile(
     r"^\s*([A-Z][a-zA-Z'''\-]+(?:\s+[A-Z][a-zA-Z'''\-]+){0,3})\s+"
-    r"(?:\d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM)|morning|afternoon|evening)",
+    r"(?:\d{1,2}(?::\d{2})?(?:\s*[-–to]+\s*\d{1,2}(?::\d{2})?)?\s*(?:am|pm|AM|PM)"
+    r"|morning|afternoon|evening)",
     re.MULTILINE,
 )
 _PHONE_RE = re.compile(r"\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}")
@@ -32,6 +33,9 @@ _HOURS_RE = re.compile(
     re.IGNORECASE,
 )
 _RATE_RE = re.compile(r"\$?\s*(\d{2,4})\s*/\s*hr", re.IGNORECASE)
+_RATE_BARE_RE = re.compile(r"^\$?\s*(\d{2,4})\s*$")
+_KNOWN_SOURCES = ("u-haul", "uhaul", "moving helper", "movinghelper", "direct", "website", "referral")
+_CONF_SENT_RE = re.compile(r"\bconf(?:irmation)?\s*sent\b|\bconf\s+sent\b", re.IGNORECASE)
 _NO_HEAVY_RE = re.compile(
     r"no\s+(?:oversized|oversize|extremely\s+heavy|heavy\s+items)|"
     r"nothing\s+over\s+\d+\s*lbs?|no\s+single\s+item\s+over",
@@ -51,12 +55,18 @@ def normalize_truck_type(value: Optional[str]) -> Optional[str]:
         return None
     text = value.strip().lower().replace(" ", "")
     text = text.replace("foot", "ft").replace("feet", "ft").replace("'", "").replace("’", "")
-    m = re.search(r"(\d+)\s*ft", text) or re.search(r"(\d+)ft", text) or re.search(r"(\d+)truck", text)
+    text = text.replace("u-haul", "uhaul").replace("uhaul", "")
+    m = (
+        re.search(r"(\d+)\s*ft", text)
+        or re.search(r"(\d+)ft", text)
+        or re.search(r"(\d+)truck", text)
+        or re.search(r"^(\d{2})", text)
+    )
     if m:
         return f"{m.group(1)}ft"
     if text.isdigit():
         return f"{text}ft"
-    return text or None
+    return value.strip() or None
 
 
 def _infer_movers(text: str) -> Optional[int]:
@@ -343,9 +353,20 @@ def _infer_access_notes(text: str) -> Optional[str]:
     parts: list[str] = []
     raw = text or ""
 
-    floor_m = re.search(r"(\d+(?:st|nd|rd|th)?\s+floor)", raw, re.IGNORECASE)
+    floor_m = re.search(
+        r"((?:\d+(?:st|nd|rd|th)?|first|second|third|fourth|fifth|sixth|ground)\s+floor)",
+        raw,
+        re.IGNORECASE,
+    )
     if floor_m:
-        parts.append(floor_m.group(1))
+        flo = floor_m.group(1)
+        flo = re.sub(r"\bfirst\s+floor\b", "1st floor", flo, flags=re.I)
+        flo = re.sub(r"\bsecond\s+floor\b", "2nd floor", flo, flags=re.I)
+        flo = re.sub(r"\bthird\s+floor\b", "3rd floor", flo, flags=re.I)
+        flo = re.sub(r"\bfourth\s+floor\b", "4th floor", flo, flags=re.I)
+        flo = re.sub(r"\bfifth\s+floor\b", "5th floor", flo, flags=re.I)
+        flo = re.sub(r"\bsixth\s+floor\b", "6th floor", flo, flags=re.I)
+        parts.append(flo)
 
     if re.search(r"loading\s+dock", raw, re.I) and re.search(r"elevator", raw, re.I):
         parts.append("loading dock beside elevator")
@@ -358,10 +379,12 @@ def _infer_access_notes(text: str) -> Optional[str]:
     if walk:
         bit = re.sub(r"\s+", " ", walk.group(1)).strip(" ,.;")
         bit = re.sub(r"^(?:about\s+a\s+|about\s+)", "", bit, flags=re.I)
-        # Keep walk short
         bit = re.split(r"\bto\b", bit, maxsplit=1)[0].strip() + " walk"
         bit = re.sub(r"\s+walk\s+walk$", " walk", bit)
         parts.append(bit)
+
+    if re.search(r"partially\s+loaded", raw, re.I):
+        parts.append("truck partially loaded from earlier address")
 
     if re.search(r"luggage\s+cart", raw, re.I):
         parts.append("complex luggage cart for small items")
@@ -399,11 +422,35 @@ def _notes_look_hallucinated(notes: Optional[str], raw: str) -> bool:
             and f"{n}st floor" not in raw_l
             and f"{n}rd floor" not in raw_l
             and f"{n} floor" not in raw_l
+            and not (n == "2" and "second floor" in raw_l)
+            and not (n == "1" and "first floor" in raw_l)
+            and not (n == "3" and "third floor" in raw_l)
         ):
             return True
     if "no elevator" in notes_l and "no elevator" not in raw_l and "without elevator" not in raw_l:
         return True
+    # Vague invented walk with no distance in email
+    if re.search(r"\bwalk distance\b|\blong walk\b", notes_l) and not _WALK_RE.search(raw):
+        if "no real long walk" not in raw_l and "long walk" not in raw_l:
+            return True
     return False
+
+
+def _scrub_hallucinated_notes(notes: Optional[str], raw: str) -> Optional[str]:
+    """Drop invented access phrases when we cannot rebuild notes from the email."""
+    if not notes:
+        return notes
+    raw_l = (raw or "").lower()
+    parts = [p.strip() for p in re.split(r"[;|]", notes) if p.strip()]
+    kept: list[str] = []
+    for p in parts:
+        pl = p.lower()
+        if "no elevator" in pl and "no elevator" not in raw_l:
+            continue
+        if re.search(r"\bwalk distance\b", pl) and not _WALK_RE.search(raw):
+            continue
+        kept.append(p)
+    return "; ".join(kept) if kept else None
 
 
 def _notes_are_bloated(notes: Optional[str]) -> bool:
@@ -490,9 +537,25 @@ def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> Extract
         m = _RATE_RE.search(blob)
         if m:
             data["hourly_rate"] = f"${m.group(1)}/hr"
+    else:
+        rate = str(data["hourly_rate"]).strip()
+        m = _RATE_RE.search(rate) or _RATE_BARE_RE.match(rate)
+        if m:
+            data["hourly_rate"] = f"${m.group(1)}/hr"
+        elif _RATE_RE.search(blob):
+            data["hourly_rate"] = f"${_RATE_RE.search(blob).group(1)}/hr"
 
-    if not data.get("booking_source") and _UHAUL_RE.search(blob):
+    src = (data.get("booking_source") or "").strip()
+    src_l = src.lower().replace(" ", "")
+    bad_source = (
+        not src
+        or _CONF_SENT_RE.search(src)
+        or not any(k.replace(" ", "") in src_l or k in src.lower() for k in _KNOWN_SOURCES)
+    )
+    if bad_source and _UHAUL_RE.search(blob):
         data["booking_source"] = "U-Haul" if re.search(r"u-?haul", blob, re.I) else "Moving Helper"
+    elif not src and re.search(r"moving\s*helper", blob, re.I):
+        data["booking_source"] = "Moving Helper"
 
     unload_only = bool(_UNLOAD_ONLY_RE.search(blob)) or (
         (data.get("service_requested") or "").lower().find("unload") >= 0
@@ -570,6 +633,8 @@ def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> Extract
         or _notes_are_bloated(data.get("special_notes"))
     ):
         data["special_notes"] = access
+    elif _notes_look_hallucinated(data.get("special_notes"), raw):
+        data["special_notes"] = _scrub_hallucinated_notes(data.get("special_notes"), raw) or access
     elif access and data.get("special_notes"):
         notes = data["special_notes"]
         for bit in access.split("; "):
