@@ -38,6 +38,8 @@ class Tenant(Base):
     rules_file: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     reply_mode: Mapped[str] = mapped_column(String(16), default="draft")
     ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # local = Ollama on VPS; cloud = hosted chat API (key only in server .env)
+    extract_engine: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     classify_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     extraction_system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     extraction_user_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -195,6 +197,7 @@ def _migrate_sqlite(engine) -> None:
         "rules_file": "VARCHAR(255)",
         "reply_mode": "VARCHAR(16) DEFAULT 'draft'",
         "ai_enabled": "BOOLEAN DEFAULT 1",
+        "extract_engine": "VARCHAR(16)",
         "classify_prompt": "TEXT",
         "extraction_system_prompt": "TEXT",
         "extraction_user_prompt": "TEXT",

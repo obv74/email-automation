@@ -43,6 +43,7 @@ class UpdateTenantBody(BaseModel):
     reply_mode: Optional[str] = None
     poll_interval_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
     ai_enabled: Optional[bool] = None
+    extract_engine: Optional[str] = None  # local | cloud
     classify_prompt: Optional[str] = Field(default=None, max_length=20000)
     extraction_system_prompt: Optional[str] = Field(default=None, max_length=20000)
     extraction_user_prompt: Optional[str] = Field(default=None, max_length=20000)

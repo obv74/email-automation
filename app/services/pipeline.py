@@ -219,6 +219,7 @@ async def process_thread(
                 conversation,
                 system_prompt=tenant_row.extraction_system_prompt if tenant_row else None,
                 user_prompt_template=tenant_row.extraction_user_prompt if tenant_row else None,
+                extract_engine=tenant_row.extract_engine if tenant_row else None,
             )
             job = enrich_job_for_pricing(job, conversation)
             append_extracted_job(
@@ -255,6 +256,7 @@ async def process_thread(
     email_type, classify_reason = await classify_email(
         conversation,
         prompt_template=tenant_row.classify_prompt if tenant_row else None,
+        extract_engine=tenant_row.extract_engine if tenant_row else None,
     )
 
     # ignore — leave unread so nothing silently disappears
@@ -296,6 +298,7 @@ async def process_thread(
             conversation,
             system_prompt=tenant_row.extraction_system_prompt if tenant_row else None,
             user_prompt_template=tenant_row.extraction_user_prompt if tenant_row else None,
+            extract_engine=tenant_row.extract_engine if tenant_row else None,
         )
         job = enrich_job_for_pricing(job, conversation)
         if email_type == "booked" and not job.booking_source:

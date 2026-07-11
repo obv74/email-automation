@@ -192,6 +192,7 @@ def update_tenant_settings(
     reply_mode: Optional[str] = None,
     poll_interval_minutes: Optional[int] = None,
     ai_enabled: Optional[bool] = None,
+    extract_engine: Optional[str] = None,
     classify_prompt: Optional[str] = None,
     extraction_system_prompt: Optional[str] = None,
     extraction_user_prompt: Optional[str] = None,
@@ -212,6 +213,11 @@ def update_tenant_settings(
         tenant.poll_interval_minutes = poll_interval_minutes
     if ai_enabled is not None:
         tenant.ai_enabled = ai_enabled
+    if extract_engine is not None:
+        eng = extract_engine.strip().lower()
+        if eng not in ("local", "cloud"):
+            raise ValueError("extract_engine must be local or cloud")
+        tenant.extract_engine = eng
     if reset_prompts:
         tenant.classify_prompt = None
         tenant.extraction_system_prompt = None

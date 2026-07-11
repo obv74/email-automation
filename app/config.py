@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     ollama_extract_num_predict: int = 400
     ollama_extract_max_chars: int = 3500
 
+    # Extract backend: local (Ollama) or cloud (hosted chat API). Default local.
+    llm_engine: str = "local"  # local | cloud
+    cloud_llm_api_key: str = ""
+    cloud_llm_base_url: str = "https://api.openai.com/v1"
+    cloud_llm_model: str = "gpt-4o-mini"
+    cloud_llm_timeout_seconds: int = 120
+
     classify_enabled: bool = True
     classify_max_chars: int = 2500
 

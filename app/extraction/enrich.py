@@ -574,7 +574,17 @@ def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> Extract
         if m:
             data["customer_phone"] = m.group(0)
 
-    if not data.get("customer_email"):
+    # Prefer an email that actually appears in the paste (LLM often drops a leading letter)
+    found_emails = [e.lower() for e in _EMAIL_RE.findall(raw or "")]
+    if not found_emails:
+        found_emails = [e.lower() for e in _EMAIL_RE.findall(blob)]
+    llm_email = (data.get("customer_email") or "").strip()
+    if found_emails and llm_email.lower() not in found_emails:
+        # Keep original casing from first regex hit in raw/blob
+        m = _EMAIL_RE.search(raw) or _EMAIL_RE.search(blob)
+        if m:
+            data["customer_email"] = m.group(0)
+    elif not llm_email and found_emails:
         m = _EMAIL_RE.search(raw) or _EMAIL_RE.search(blob)
         if m:
             data["customer_email"] = m.group(0)

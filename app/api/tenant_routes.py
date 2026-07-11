@@ -91,6 +91,7 @@ def api_update_my_company(
             reply_mode=body.reply_mode,
             poll_interval_minutes=body.poll_interval_minutes,
             ai_enabled=body.ai_enabled,
+            extract_engine=body.extract_engine,
             classify_prompt=body.classify_prompt,
             extraction_system_prompt=body.extraction_system_prompt,
             extraction_user_prompt=body.extraction_user_prompt,
@@ -154,6 +155,7 @@ def api_update_tenant(
             reply_mode=body.reply_mode,
             poll_interval_minutes=body.poll_interval_minutes,
             ai_enabled=body.ai_enabled,
+            extract_engine=body.extract_engine,
             classify_prompt=body.classify_prompt,
             extraction_system_prompt=body.extraction_system_prompt,
             extraction_user_prompt=body.extraction_user_prompt,
@@ -358,6 +360,7 @@ async def api_extract_text(
             text,
             system_prompt=tenant.extraction_system_prompt,
             user_prompt_template=tenant.extraction_user_prompt,
+            extract_engine=tenant.extract_engine,
         )
         job = enrich_job_for_pricing(job, text)
     except Exception as exc:
