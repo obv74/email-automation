@@ -220,7 +220,7 @@ function PromptsForm() {
             />
             <PromptEditor
               label="2b. Extract — user prompt"
-              description="Keep {schema}, {example}, and {email}. Short prompts = faster on weak VPS."
+              description="Keep {schema} and {email}. Short prompts = faster on weak VPS. No few-shot (small models copy example facts)."
               placeholders={placeholders.extraction}
               value={extractionUser}
               onChange={setExtractionUser}

@@ -21,26 +21,26 @@ CLASSIFY_SYSTEM = (
 )
 
 EXTRACTION_SYSTEM = """Extract moving-job fields as ONE compact JSON object. No markdown.
-CRITICAL: Use ONLY facts present in the email. If a field is not in the email, use null or [].
-NEVER copy names, phones, emails, prices, or addresses from the format example.
-Keep strings SHORT. inventory max 8 short items. summary max 25 words. promises_made usually [].
+Use ONLY facts from the email. If missing → null or []. Never invent floors, phones, prices, or names.
+Keep strings SHORT. inventory max 8 items. summary max 25 words. promises_made usually [].
 Rules:
-1) Name only if stated (signature "Best, Joshua" → "Joshua"). Do not invent a last name.
-2) phone/email only if present in the email text
-3) unload vs load addresses from the email
-4) truck like 15ft if mentioned; U-Haul/Moving Helper → num_movers=2 if crew size unknown
-5) minimum_hours / hourly_rate ONLY if the email states them — otherwise null
-6) Customer U-Haul gear → special_notes, NOT promises_made
-Always finish valid JSON (close all braces/quotes)."""
+1) Name only if stated (e.g. "Best, Joshua" → "Joshua").
+2) phone/email only if in the email.
+3) Unload-only job → unload_address set, load_address=null. Load-only → opposite.
+4) special_notes = ONLY access notes from THIS email (floor #, elevator, walk distance). Never invent.
+5) truck like 15ft if mentioned. U-Haul/Moving Helper with unknown crew → num_movers=2.
+6) minimum_hours/hourly_rate only if stated in email, else null.
+7) Customer-owned U-Haul gear → special_notes, not promises_made.
+8) Preferred time window like "1-3pm" or "as early as 12pm" → move_time.
+Always close all braces/quotes (valid JSON)."""
 
-EXTRACTION_USER = """JSON only. Extract from THIS email — ignore example values.
+EXTRACTION_USER = """JSON only from THIS email. null if not stated.
 {schema}
-{example}
 Email:
 ---
 {email}
 ---
-Complete valid JSON now. null for anything not in the email."""
+Complete valid JSON now."""
 
 REPLY_TEMPLATE = """Hi {customer_name},
 
@@ -67,7 +67,7 @@ Your Moving Team
 
 # Placeholders shown in the Settings UI help text
 CLASSIFY_PLACEHOLDERS = "{email}"
-EXTRACTION_PLACEHOLDERS = "{email}, {schema}, {example}"
+EXTRACTION_PLACEHOLDERS = "{email}, {schema}"
 REPLY_PLACEHOLDERS = (
     "{customer_name}, {summary}, {load_address}, {unload_address}, "
     "{move_date}, {move_time}, {inventory}, {customer_requests}, {quote}, "

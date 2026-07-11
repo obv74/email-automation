@@ -104,6 +104,107 @@ _ASSEMBLY_NO_RE = re.compile(
 )
 _PACK_YES_RE = re.compile(r"\b(?:need|want|require)s?\s+(?:full\s+)?packing\b|\bpack(?:ing)?\s+(?:service|help)\b", re.I)
 _UNPACK_YES_RE = re.compile(r"\b(?:need|want|require)s?\s+unpacking\b|\bunpack(?:ing)?\s+(?:service|help)\b", re.I)
+_TIME_WINDOW_RE = re.compile(
+    r"(?:preferred\s+(?:time\s+)?window|window|as\s+early\s+as)\s*[:=]?\s*"
+    r"(\d{1,2}(?::\d{2})?\s*(?:am|pm)?(?:\s*[-–to]+\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?)"
+    r"|"
+    r"\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*[-–to]+\s*\d{1,2}(?::\d{2})?\s*(?:am|pm))\b",
+    re.IGNORECASE,
+)
+_EARLY_AS_RE = re.compile(
+    r"as\s+early\s+as\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))",
+    re.IGNORECASE,
+)
+_FLOOR_ACCESS_RE = re.compile(
+    r"(\d+(?:st|nd|rd|th)?\s+floor[^.!\n]{0,120})",
+    re.IGNORECASE,
+)
+_WALK_RE = re.compile(
+    r"(\d+\s*[-–to]+\s*\d+\s*(?:ft|feet|foot)\s+walk[^.!\n]{0,40})",
+    re.IGNORECASE,
+)
+_ELEVATOR_RE = re.compile(
+    r"((?:no\s+)?elevator|loading\s+dock[^.!\n]{0,60})",
+    re.IGNORECASE,
+)
+_HAND_TRUCK_RE = re.compile(
+    r"((?:u-?haul\s+)?hand\s+truck[^.!\n]{0,40})",
+    re.IGNORECASE,
+)
+_UNLOAD_AT_RE = re.compile(
+    r"(?:unloading\s+at|unload\s+address|deliver(?:y|ing)?\s+to)\s*[:\-]?\s*"
+    r"([^\n]{10,120})",
+    re.IGNORECASE,
+)
+_EXPLICIT_ONE_MOVER_RE = re.compile(
+    r"\b(?:1|one)\s*(?:mover|person|man)\b|\bsingle\s+mover\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_addr(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def _infer_move_time(text: str) -> Optional[str]:
+    m = _TIME_WINDOW_RE.search(text or "")
+    if m:
+        raw = (m.group(1) or m.group(2) or "").strip(" :")
+        if raw:
+            early = _EARLY_AS_RE.search(text or "")
+            if early and early.group(1).lower() not in raw.lower():
+                return f"{raw} (as early as {early.group(1)})"
+            return raw
+    early = _EARLY_AS_RE.search(text or "")
+    if early:
+        return f"as early as {early.group(1)}"
+    return None
+
+
+def _infer_access_notes(text: str) -> Optional[str]:
+    """Build access notes only from phrases present in the email."""
+    parts: list[str] = []
+    floor = _FLOOR_ACCESS_RE.search(text or "")
+    if floor:
+        parts.append(re.sub(r"\s+", " ", floor.group(1)).strip(" ,.;"))
+    for rx in (_ELEVATOR_RE, _WALK_RE, _HAND_TRUCK_RE):
+        m = rx.search(text or "")
+        if not m:
+            continue
+        bit = re.sub(r"\s+", " ", m.group(1)).strip(" ,.;")
+        if bit and not any(bit.lower() in p.lower() for p in parts):
+            parts.append(bit)
+    if not parts:
+        return None
+    cleaned: list[str] = []
+    for p in parts:
+        if cleaned and p.lower() in cleaned[-1].lower():
+            continue
+        cleaned.append(p)
+    return "; ".join(cleaned[:4])
+
+
+def _notes_look_hallucinated(notes: Optional[str], raw: str) -> bool:
+    """True when special_notes contain floors/access not present in the email."""
+    if not notes:
+        return False
+    raw_l = (raw or "").lower()
+    notes_l = notes.lower()
+    for m in re.finditer(r"(\d+)\s*(?:st|nd|rd|th)?\s*floor", notes_l):
+        n = m.group(1)
+        if (
+            f"{n}th floor" not in raw_l
+            and f"{n}nd floor" not in raw_l
+            and f"{n}st floor" not in raw_l
+            and f"{n}rd floor" not in raw_l
+            and f"{n} floor" not in raw_l
+        ):
+            return True
+    if "no elevator" in notes_l and "no elevator" not in raw_l and "without elevator" not in raw_l:
+        return True
+    return False
 
 
 def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> ExtractedJob:
@@ -138,17 +239,30 @@ def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> Extract
         if m:
             data["customer_email"] = m.group(0)
 
+    inferred_movers = _infer_movers(blob)
     if data.get("num_movers") is None:
-        inferred = _infer_movers(blob)
-        if inferred is not None:
-            data["num_movers"] = inferred
+        if inferred_movers is not None:
+            data["num_movers"] = inferred_movers
         elif _UHAUL_RE.search(blob):
             data["num_movers"] = 2
+    elif (
+        data.get("num_movers") == 1
+        and _UHAUL_RE.search(blob)
+        and inferred_movers is None
+        and not _EXPLICIT_ONE_MOVER_RE.search(raw)
+    ):
+        # Small models often emit 1; U-Haul labor default is 2 unless email says otherwise
+        data["num_movers"] = 2
 
     truck = normalize_truck_type(data.get("truck_type"))
     if not truck:
         truck = _infer_truck(blob)
     data["truck_type"] = truck
+
+    if not data.get("move_time"):
+        inferred_time = _infer_move_time(raw) or _infer_move_time(blob)
+        if inferred_time:
+            data["move_time"] = inferred_time
 
     if not data.get("minimum_hours"):
         m = _HOURS_RE.search(blob)
@@ -177,6 +291,31 @@ def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> Extract
             if data.get("unpacking") in (None, ""):
                 data["unpacking"] = "N"
 
+    if unload_only:
+        if not data.get("service_requested"):
+            data["service_requested"] = "unload only"
+        # Prefer unload address from email; clear load for unload-only jobs
+        m = _UNLOAD_AT_RE.search(raw)
+        if m:
+            addr = re.sub(r"\s+", " ", m.group(1)).strip(" .,;")
+            # Stop at common trailing clauses
+            addr = re.split(r"\b(?:on|at|with|preferred|inventory|items)\b", addr, maxsplit=1, flags=re.I)[0].strip(" .,;")
+            if len(addr) >= 10:
+                data["unload_address"] = addr
+        load = data.get("load_address")
+        unload = data.get("unload_address")
+        if load and unload and _normalize_addr(load) == _normalize_addr(unload):
+            data["load_address"] = None
+        elif load and not unload:
+            data["unload_address"] = load
+            data["load_address"] = None
+        else:
+            data["load_address"] = None
+    elif load_only:
+        if not data.get("service_requested"):
+            data["service_requested"] = "load only"
+        data["unload_address"] = None
+
     if _PACK_YES_RE.search(blob):
         data["packing"] = "Y"
     if _UNPACK_YES_RE.search(blob):
@@ -191,6 +330,20 @@ def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> Extract
         data["assembly"] = "N"
     elif _ASSEMBLY_YES_RE.search(blob):
         data["assembly"] = "Y"
+
+    access = _infer_access_notes(raw)
+    if access and (
+        not data.get("special_notes")
+        or _notes_look_hallucinated(data.get("special_notes"), raw)
+    ):
+        data["special_notes"] = access
+    elif access and data.get("special_notes"):
+        # Merge missing walk/elevator bits from email without inventing floors
+        notes = data["special_notes"]
+        for bit in access.split("; "):
+            if bit and bit.lower() not in notes.lower():
+                notes = f"{notes}; {bit}"
+        data["special_notes"] = notes
 
     promises = list(data.get("promises_made") or [])
     cleaned = []
