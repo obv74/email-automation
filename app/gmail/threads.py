@@ -112,6 +112,31 @@ def format_conversation(messages: list[ParsedMessage]) -> str:
     return "\n".join(lines)
 
 
+def parse_gmail_thread_ref(ref: str) -> Optional[str]:
+    """
+    Accept a raw Gmail thread id OR a Gmail URL and return the thread id.
+    Examples:
+      FMfcgzQ... 
+      https://mail.google.com/mail/u/0/#inbox/FMfcgzQ...
+      https://mail.google.com/mail/u/0/#all/18abc...
+    """
+    if not ref:
+        return None
+    text = ref.strip()
+    # URL with #inbox/ID or #all/ID or #label/name/ID
+    m = re.search(r"#(?:inbox|all|sent|starred|snoozed|important|search/[^/]+|label/[^/]+)/([a-zA-Z0-9]+)", text)
+    if m:
+        return m.group(1)
+    # /threads/ID style (rare)
+    m = re.search(r"/threads/([a-zA-Z0-9]+)", text)
+    if m:
+        return m.group(1)
+    # Bare id (Gmail thread ids are alphanumeric, often start with F or hex-ish)
+    if re.fullmatch(r"[a-zA-Z0-9]+", text) and len(text) >= 10:
+        return text
+    return None
+
+
 def fetch_full_thread(gmail, thread_id: str) -> tuple[list[ParsedMessage], str]:
     thread = gmail.users().threads().get(userId="me", id=thread_id, format="full").execute()
     raw_messages = thread.get("messages", [])

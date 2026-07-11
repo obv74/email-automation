@@ -130,6 +130,13 @@ export const api = {
   poll: (token: string, slug: string) =>
     request<unknown[]>(`/api/tenants/${slug}/poll`, { method: "POST" }, token),
 
+  extractThread: (token: string, slug: string, threadRef: string) =>
+    request<{ status: string; thread_id?: string; extraction?: Record<string, unknown> }>(
+      `/api/tenants/${slug}/extract`,
+      { method: "POST", body: JSON.stringify({ thread_ref: threadRef }) },
+      token
+    ),
+
   sendLog: (token: string, slug: string, logId: number) =>
     request<{ status: string; message_id?: string }>(
       `/api/tenants/${slug}/logs/${logId}/send`,

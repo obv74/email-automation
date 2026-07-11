@@ -99,3 +99,8 @@ class MessageLogOut(BaseModel):
     draft_exists: Optional[bool]
     can_send: bool
     created_at: datetime
+
+
+class ExtractThreadBody(BaseModel):
+    """Paste a Gmail URL or thread id — only that thread is read."""
+    thread_ref: str = Field(min_length=5, max_length=2000)

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { CheckCircle2, ExternalLink, Play, RefreshCw, Settings } from "lucide-react";
+import { CheckCircle2, ExternalLink, Play, RefreshCw, Settings, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { AuthGuard } from "@/components/AuthGuard";
 import { MessageLogPanel } from "@/components/MessageLogPanel";
@@ -17,6 +17,8 @@ function DashboardContent() {
   const [logs, setLogs] = useState<MessageLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [polling, setPolling] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [threadRef, setThreadRef] = useState("");
   const [sendingId, setSendingId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -48,6 +50,31 @@ function DashboardContent() {
     }
   }, [searchParams, reload]);
 
+  async function onExtract() {
+    const token = getToken();
+    if (!token || !company) return;
+    if (!threadRef.trim()) {
+      setError("Paste a Gmail thread link (or thread id) first.");
+      return;
+    }
+    setExtracting(true);
+    setError("");
+    try {
+      const result = await api.extractThread(token, company.slug, threadRef.trim());
+      await loadLogs();
+      setNotice(
+        result.status === "extracted"
+          ? "Extracted that one email into job categories (no reply drafted)."
+          : `Done: ${result.status}`
+      );
+      setThreadRef("");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Extract failed");
+    } finally {
+      setExtracting(false);
+    }
+  }
+
   async function onPoll() {
     const token = getToken();
     if (!token || !company) return;
@@ -60,7 +87,7 @@ function DashboardContent() {
       setNotice(
         company.ai_enabled
           ? "Inbox checked — AI processed new mail."
-          : "Inbox checked — emails logged (AI is off)."
+          : "Inbox not auto-processed (AI is off). Use Extract one email instead."
       );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Poll failed");
@@ -99,7 +126,7 @@ function DashboardContent() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">{company?.name || "Dashboard"}</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {company?.ai_enabled ? "AI processing on" : "Monitor only — AI off"}
+            {company?.ai_enabled ? "Auto-poll on" : "Manual mode — AI auto-poll off"}
             {company?.gmail_connected ? " · Inbox connected" : " · Gmail not connected"}
           </p>
         </div>
@@ -108,22 +135,54 @@ function DashboardContent() {
             <Settings className="h-4 w-4" />
             Settings
           </Link>
-          {company?.gmail_connected ? (
-            <button onClick={onPoll} className="btn-primary" disabled={polling}>
+          {company?.gmail_connected && company.ai_enabled ? (
+            <button onClick={onPoll} className="btn-secondary" disabled={polling}>
               <Play className="h-4 w-4" />
-              {polling ? "Checking…" : "Check inbox"}
+              {polling ? "Checking…" : "Check inbox (all unread)"}
             </button>
-          ) : (
+          ) : null}
+          {!company?.gmail_connected ? (
             <Link href="/settings" className="btn-primary">
               Connect Gmail
             </Link>
-          )}
+          ) : null}
         </div>
       </div>
 
-      {!company?.gmail_connected && (
+      {company?.gmail_connected ? (
+        <div className="card mb-5 space-y-3">
+          <div className="flex items-start gap-2">
+            <Sparkles className="mt-0.5 h-4 w-4 text-brand-600" />
+            <div>
+              <h2 className="font-semibold text-slate-900">Extract one email (recommended)</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Paste a Gmail link for the thread you choose. Only that email is read — no full-inbox
+                scan, no auto-reply. Job categories appear in the log below (and{" "}
+                <code className="text-xs">ExtractedJobs</code> sheet).
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="text"
+              value={threadRef}
+              onChange={(e) => setThreadRef(e.target.value)}
+              placeholder="https://mail.google.com/mail/u/0/#inbox/…"
+              className="input-field flex-1"
+            />
+            <button
+              type="button"
+              onClick={onExtract}
+              disabled={extracting || !company.gmail_connected}
+              className="btn-primary whitespace-nowrap"
+            >
+              {extracting ? "Extracting…" : "Extract job"}
+            </button>
+          </div>
+        </div>
+      ) : (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Connect Gmail in Settings to start monitoring inquiries.
+          Connect Gmail in Settings, then paste one thread link to extract.
         </div>
       )}
 
@@ -143,7 +202,10 @@ function DashboardContent() {
       {company && (
         <div className="mb-5 flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600">
           <span>
-            Auto-check: <strong className="text-slate-900">every {company.poll_interval_minutes} min</strong>
+            Auto-check:{" "}
+            <strong className="text-slate-900">
+              {company.ai_enabled ? `every ${company.poll_interval_minutes} min` : "off (manual only)"}
+            </strong>
           </span>
           <span>
             Pricing:{" "}

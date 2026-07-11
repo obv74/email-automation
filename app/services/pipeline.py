@@ -21,7 +21,7 @@ from app.gmail.labels import (
     LABEL_NEEDS_HUMAN,
     apply_agent_label,
 )
-from app.gmail.threads import fetch_full_thread, list_recent_thread_ids
+from app.gmail.threads import fetch_full_thread, list_recent_thread_ids, parse_gmail_thread_ref
 from app.pricing.quote import compute_quote, quote_failure_reason
 from app.pricing.sheets import append_extracted_job, fetch_pricing_rows, fetch_stock_responses
 from app.replies.generate import generate_reply
@@ -30,6 +30,21 @@ from app.tenants.service import get_tenant, tenant_reply_mode
 logger = logging.getLogger(__name__)
 
 PROCESSING_STALE_MINUTES = 20
+
+
+async def extract_chosen_thread(
+    db: Session,
+    tenant_id: str,
+    thread_ref: str,
+) -> dict:
+    """
+    Manual mode: extract ONE thread the user pasted (URL or id).
+    Never drafts a reply. Works even when AI auto-poll is off.
+    """
+    thread_id = parse_gmail_thread_ref(thread_ref)
+    if not thread_id:
+        raise RuntimeError("Could not parse Gmail thread id from that link. Paste the full Gmail URL or thread id.")
+    return await process_thread(db, tenant_id, thread_id, force=True, extract_only=True)
 
 
 def _should_skip_thread(
@@ -164,7 +179,13 @@ def _mark_needs_human(
     db.commit()
 
 
-async def process_thread(db: Session, tenant_id: str, thread_id: str, force: bool = False) -> dict:
+async def process_thread(
+    db: Session,
+    tenant_id: str,
+    thread_id: str,
+    force: bool = False,
+    extract_only: bool = False,
+) -> dict:
     gmail = get_gmail_service(db, tenant_id)
     messages, conversation = fetch_full_thread(gmail, thread_id)
     if not messages:
@@ -186,9 +207,50 @@ async def process_thread(db: Session, tenant_id: str, thread_id: str, force: boo
     tenant_row = get_tenant(db, tenant_id)
     ai_on = True if not tenant_row or tenant_row.ai_enabled is None else bool(tenant_row.ai_enabled)
 
-    # AI off: do not touch Gmail (no read, no draft). Caller should also skip polling.
-    if not ai_on and not force:
+    # AI off: do not auto-touch Gmail — unless this is an explicit manual extract/force.
+    if not ai_on and not force and not extract_only:
         return {"status": "ai_off", "thread_id": thread_id}
+
+    # Manual extract: skip classify/reply — only read this one thread and fill categories.
+    if extract_only:
+        claim = _claim_thread(db, tenant_id, thread_id, latest.message_id)
+        try:
+            job = await extract_job_from_thread(
+                conversation,
+                system_prompt=tenant_row.extraction_system_prompt if tenant_row else None,
+                user_prompt_template=tenant_row.extraction_user_prompt if tenant_row else None,
+            )
+            job = enrich_job_for_pricing(job, conversation)
+            append_extracted_job(
+                db,
+                tenant_id,
+                job,
+                gmail_thread_id=thread_id,
+                email_type="manual",
+            )
+            log = MessageLog(
+                tenant_id=tenant_id,
+                gmail_thread_id=thread_id,
+                direction="extracted",
+                subject=latest.subject,
+                inbound_body=latest.body[:8000] if latest.body else None,
+                extraction_json=json.dumps(job.model_dump()),
+                reply_body="Manual extract — no reply drafted.",
+                rule_name="manual_extract",
+            )
+            db.add(log)
+            _release_thread_claim(db, claim, success=True, status="extracted")
+            apply_agent_label(gmail, thread_id, LABEL_EXTRACTED, mark_read=False)
+            return {
+                "status": "extracted",
+                "thread_id": thread_id,
+                "email_type": "manual",
+                "extraction": job.model_dump(),
+                "marked_read": False,
+            }
+        except Exception:
+            _release_thread_claim(db, claim, success=False)
+            raise
 
     email_type, classify_reason = await classify_email(
         conversation,

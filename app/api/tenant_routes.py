@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.schemas import CreateTenantBody, MessageLogOut, TenantOut, UpdateTenantBody
+from app.api.schemas import CreateTenantBody, ExtractThreadBody, MessageLogOut, TenantOut, UpdateTenantBody
 from app.auth.deps import get_current_user, require_tenant_access
 from app.auth.google_oauth import disconnect_gmail
 from app.db.models import MessageLog, ProcessedThread, User, get_db
@@ -15,7 +15,7 @@ from app.gmail.client import get_gmail_service
 from app.gmail.drafts import send_draft, send_message
 from app.gmail.threads import fetch_full_thread, list_recent_thread_ids
 from app.services.draft_sync import purge_logs_for_missing_threads, sync_draft_logs
-from app.services.pipeline import poll_unread_threads, process_thread
+from app.services.pipeline import extract_chosen_thread, poll_unread_threads, process_thread
 from app.tenants.service import (
     create_tenant,
     get_or_create_user_company,
@@ -326,6 +326,26 @@ def api_list_unread(
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.post("/tenants/{tenant_slug}/extract")
+async def api_extract_chosen(
+    tenant_slug: str,
+    body: ExtractThreadBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Extract job categories from ONE Gmail thread the user pasted. No auto-inbox scan."""
+    tenant = require_tenant_access(db, user, tenant_slug)
+    if not tenant.gmail_connected:
+        raise HTTPException(400, "Connect Gmail first")
+    try:
+        return await extract_chosen_thread(db, tenant.id, body.thread_ref)
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Manual extract failed for %s", tenant_slug)
+        raise HTTPException(500, f"Extract failed: {exc}") from exc
+
+
 @router.post("/tenants/{tenant_slug}/poll")
 async def api_poll(
     tenant_slug: str,
@@ -347,12 +367,15 @@ async def api_process_thread(
     tenant_slug: str,
     thread_id: str,
     force: bool = False,
+    extract_only: bool = False,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     tenant = require_tenant_access(db, user, tenant_slug)
     try:
-        return await process_thread(db, tenant.id, thread_id, force=force)
+        return await process_thread(
+            db, tenant.id, thread_id, force=force, extract_only=extract_only
+        )
     except RuntimeError as exc:
         raise HTTPException(400, str(exc)) from exc
 
