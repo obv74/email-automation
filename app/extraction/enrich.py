@@ -124,7 +124,7 @@ _STREET_ADDR_RE = re.compile(
     r"(?:(?P<label>[A-Za-z][A-Za-z0-9'&. \-]{1,40})\s*:\s*)?"
     r"(?P<street>\d{1,6}\s+[A-Za-z0-9.' \-]+?"
     r"(?:Blvd|Boulevard|St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Ct|Court|Way|Pkwy|Parkway|Pl|Place)\.?)"
-    r"(?:,?\s*(?P<citystate>[A-Za-z .]+,\s*[A-Z]{2}(?:\s+\d{5}(?:-\d{4})?)?))?",
+    r"(?:,?\s*(?P<city>[A-Za-z .]+?)\s*,\s*(?P<state>[A-Z]{2})(?:\s+(?P<zip>\d{5}(?:-\d{4})?))?)?",
     re.IGNORECASE,
 )
 _INCOMPLETE_ADDR_TAIL_RE = re.compile(
@@ -136,8 +136,46 @@ _FLUFF_ADDR_PREFIX_RE = re.compile(
     r"^(?:the\s+)?(?:apartment\s+complex|complex|building|property)\s+",
     re.IGNORECASE,
 )
+_LABEL_JUNK = {
+    "at",
+    "the",
+    "an",
+    "a",
+    "to",
+    "in",
+    "from",
+    "for",
+    "on",
+    "near",
+    "apartment",
+    "apartments",
+    "complex",
+    "building",
+    "property",
+    "unload",
+    "unloading",
+    "load",
+    "loading",
+    "just",
+    "be",
+    "will",
+    "it",
+}
 _EXPLICIT_ONE_MOVER_RE = re.compile(
     r"\b(?:1|one)\s*(?:mover|person|man)\b|\bsingle\s+mover\b",
+    re.IGNORECASE,
+)
+_US_STATES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA",
+    "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+    "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT",
+    "VA", "WA", "WV", "WI", "WY", "DC",
+}
+_NAMED_STREET_RE = re.compile(
+    r"(?P<label>[A-Za-z][A-Za-z0-9'&. \-]{1,40}?)\s*:\s*"
+    r"(?P<street>\d{1,6}\s+[A-Za-z0-9.' \-]+?"
+    r"(?:Blvd|Boulevard|St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Ct|Court|Way|Pkwy|Parkway|Pl|Place)\.?)"
+    r"(?:,?\s*(?P<city>[A-Za-z .]+?)\s*,\s*(?P<state>[A-Z]{2})(?:\s+(?P<zip>\d{5}(?:-\d{4})?))?)?",
     re.IGNORECASE,
 )
 
@@ -148,55 +186,156 @@ def _normalize_addr(value: Optional[str]) -> str:
     return re.sub(r"\s+", " ", value.strip().lower())
 
 
+def _clean_label(label: str) -> str:
+    bits = [b for b in label.strip(" :").split() if b]
+    while bits and bits[0].lower().strip(".,") in _LABEL_JUNK:
+        bits.pop(0)
+    while bits and bits[-1].lower().strip(".,") in _LABEL_JUNK:
+        bits.pop()
+    if len(bits) > 3:
+        bits = bits[-3:]
+    return " ".join(bits).strip(" ,.")
+
+
+def _addr_score(addr: Optional[str]) -> int:
+    """Higher = more complete / trustworthy address."""
+    if not addr:
+        return -1
+    s = 0
+    if re.search(r"\d{5}(?:-\d{4})?", addr):
+        s += 50
+    st = re.search(r",\s*([A-Za-z]{2})\b", addr)
+    if st and st.group(1).upper() in _US_STATES:
+        s += 20
+    if re.search(
+        r"\b(?:Blvd|St|Street|Ave|Rd|Dr|Ln|Ct|Way|Pkwy|Pl)\b",
+        addr,
+        re.I,
+    ):
+        s += 10
+    if re.search(r"\b\d{1,6}\s+[A-Za-z]", addr):
+        s += 10
+    if re.search(r":\s*\d", addr):
+        s += 5  # named building + street
+    # Penalize truncation / junk
+    if re.search(
+        r",\s*No\b|\bThe apartment is\b|\bapartment is\b|\bat the apartment\b",
+        addr,
+        re.I,
+    ):
+        s -= 40
+    if addr.rstrip().endswith((" No", " the", " is", ",")):
+        s -= 30
+    if len(addr) < 12:
+        s -= 20
+    return s
+
+
+def _format_addr_match(m: re.Match) -> Optional[str]:
+    label = _clean_label(m.groupdict().get("label") or "")
+    street = re.sub(r"\s+", " ", (m.group("street") or "").strip(" ,."))
+    city = re.sub(r"\s+", " ", (m.groupdict().get("city") or "").strip(" ,."))
+    state = (m.groupdict().get("state") or "").upper()
+    zip_code = m.groupdict().get("zip") or ""
+
+    if state and state not in _US_STATES:
+        city, state, zip_code = "", "", ""
+    if city and re.search(r"\b(house|complex|apartment|building)\b", city, re.I) and not zip_code:
+        city, state, zip_code = "", "", ""
+
+    if label:
+        out = f"{label}: {street}"
+    else:
+        out = street
+    if city and state:
+        out = f"{out}, {city}, {state}"
+        if zip_code:
+            out = f"{out} {zip_code}"
+    elif state and zip_code:
+        out = f"{out}, {state} {zip_code}"
+    return out
+
+
+def _extract_addresses(source: str) -> list[str]:
+    found: list[str] = []
+    for rx in (_NAMED_STREET_RE, _STREET_ADDR_RE):
+        for m in rx.finditer(source or ""):
+            formatted = _format_addr_match(m)
+            if formatted and formatted not in found:
+                found.append(formatted)
+    return found
+
+
 def _clean_address(value: Optional[str], raw: str = "") -> Optional[str]:
     """Turn messy LLM/email address blobs into 'Label: street, City, ST ZIP'."""
     text = (value or "").strip()
     if not text and not raw:
         return None
 
-    for source in (text, raw):
+    candidates: list[str] = []
+    # Prefer full address from the email body over truncated LLM strings
+    for source in (raw, text):
         if not source:
             continue
-        m = _STREET_ADDR_RE.search(source)
-        if not m:
-            continue
-        label = (m.group("label") or "").strip(" :")
-        street = re.sub(r"\s+", " ", (m.group("street") or "").strip(" ,."))
-        citystate = re.sub(r"\s+", " ", (m.group("citystate") or "").strip(" ,."))
-        if label:
-            label = _FLUFF_ADDR_PREFIX_RE.sub("", label).strip()
-            if len(label) > 40:
-                bits = label.split()
-                label = " ".join(bits[-2:]) if len(bits) >= 2 else label
-        if label and not label.lower().startswith("apartment"):
-            out = f"{label}: {street}"
-        else:
-            out = street
-        if citystate:
-            out = f"{out}, {citystate}"
-        return out
+        candidates.extend(_extract_addresses(source))
+
+    if text:
+        candidates.append(text)
+
+    best: Optional[str] = None
+    best_score = -999
+    for c in candidates:
+        score = _addr_score(c)
+        if score > best_score:
+            best_score = score
+            best = c
+
+    if best and best_score >= 10:
+        return best
 
     cleaned = _INCOMPLETE_ADDR_TAIL_RE.sub("", text).strip(" .,;")
     cleaned = _FLUFF_ADDR_PREFIX_RE.sub("", cleaned).strip(" .,;")
     cleaned = re.sub(r"\s+", " ", cleaned)
-    if cleaned.endswith((" the", " The", " is", " at")):
+    cleaned = re.sub(r",\s*No\b.*$", "", cleaned, flags=re.I).strip(" .,;")
+    if cleaned.endswith((" the", " The", " is", " at", " No")):
         cleaned = cleaned.rsplit(" ", 1)[0].strip(" .,;")
     return cleaned or None
 
 
 def _infer_move_time(text: str) -> Optional[str]:
-    m = _TIME_WINDOW_RE.search(text or "")
-    if m:
-        raw = (m.group(1) or m.group(2) or "").strip(" :")
-        if raw:
-            early = _EARLY_AS_RE.search(text or "")
-            if early and early.group(1).lower() not in raw.lower():
-                return f"{raw} (as early as {early.group(1)})"
-            return raw
+    # Prefer explicit ranges like 1-3pm over "as early as 12pm" alone
+    range_m = re.search(
+        r"\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*[-–to]+\s*\d{1,2}(?::\d{2})?\s*(?:am|pm))\b",
+        text or "",
+        re.I,
+    )
+    if not range_m:
+        range_m = re.search(
+            r"(?:preferred\s+(?:time\s+)?window|window)\s*(?:is|=|:)?\s*"
+            r"(\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[-–to]+\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?)",
+            text or "",
+            re.I,
+        )
     early = _EARLY_AS_RE.search(text or "")
+    if range_m:
+        window = re.sub(r"\s*[-–to]+\s*", "-", range_m.group(1), flags=re.I)
+        window = re.sub(r"\s+", "", window)
+        if early and early.group(1).lower().replace(" ", "") not in window.lower():
+            return f"{window} (as early as {early.group(1)})"
+        return window
     if early:
         return f"as early as {early.group(1)}"
     return None
+
+
+def _time_is_incomplete(value: Optional[str]) -> bool:
+    if not value:
+        return True
+    v = value.lower()
+    # Only "as early as 12pm" without a preferred window range
+    if "as early as" in v and not re.search(r"\d\s*[-–]\s*\d", v):
+        return True
+    return False
 
 
 def _infer_access_notes(text: str) -> Optional[str]:
@@ -219,6 +358,9 @@ def _infer_access_notes(text: str) -> Optional[str]:
     if walk:
         bit = re.sub(r"\s+", " ", walk.group(1)).strip(" ,.;")
         bit = re.sub(r"^(?:about\s+a\s+|about\s+)", "", bit, flags=re.I)
+        # Keep walk short
+        bit = re.split(r"\bto\b", bit, maxsplit=1)[0].strip() + " walk"
+        bit = re.sub(r"\s+walk\s+walk$", " walk", bit)
         parts.append(bit)
 
     if re.search(r"luggage\s+cart", raw, re.I):
@@ -267,10 +409,13 @@ def _notes_look_hallucinated(notes: Optional[str], raw: str) -> bool:
 def _notes_are_bloated(notes: Optional[str]) -> bool:
     if not notes:
         return False
-    if len(notes) > 180:
+    if len(notes) > 140:
         return True
     floors = re.findall(r"\d+(?:st|nd|rd|th)?\s+floor", notes, flags=re.I)
-    return len(floors) >= 2
+    if len(floors) >= 2:
+        return True
+    walks = re.findall(r"\d+\s*[-–to]+\s*\d+\s*(?:ft|feet|foot)\s+walk", notes, flags=re.I)
+    return len(walks) >= 2
 
 
 def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> ExtractedJob:
@@ -325,10 +470,16 @@ def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> Extract
         truck = _infer_truck(blob)
     data["truck_type"] = truck
 
-    if not data.get("move_time"):
-        inferred_time = _infer_move_time(raw) or _infer_move_time(blob)
-        if inferred_time:
-            data["move_time"] = inferred_time
+    inferred_time = _infer_move_time(raw) or _infer_move_time(blob)
+    if inferred_time and (
+        not data.get("move_time") or _time_is_incomplete(data.get("move_time"))
+    ):
+        data["move_time"] = inferred_time
+    elif data.get("move_time") and raw:
+        early = _EARLY_AS_RE.search(raw)
+        mt = data["move_time"]
+        if early and early.group(1).lower() not in mt.lower() and "early" not in mt.lower():
+            data["move_time"] = f"{mt} (as early as {early.group(1)})"
 
     if not data.get("minimum_hours"):
         m = _HOURS_RE.search(blob)
@@ -425,13 +576,6 @@ def enrich_job_for_pricing(job: ExtractedJob, conversation: str = "") -> Extract
             if bit and bit.lower() not in notes.lower():
                 notes = f"{notes}; {bit}"
         data["special_notes"] = notes
-
-    # Prefer early-arrival detail in Time when email has it
-    if data.get("move_time") and raw:
-        early = _EARLY_AS_RE.search(raw)
-        mt = data["move_time"]
-        if early and early.group(1).lower() not in mt.lower() and "early" not in mt.lower():
-            data["move_time"] = f"{mt} (as early as {early.group(1)})"
 
     promises = list(data.get("promises_made") or [])
     cleaned = []
